@@ -1,0 +1,5 @@
+# BAC — configuração do sistema de backlog.
+# Convenções gerais: ./BAC.md.
+#
+# Sprints não têm timebox fixo — são pacotes de features fechados pelo usuário.
+# Não há duração default: a sprint fica OPEN até o usuário decidir fechar.
