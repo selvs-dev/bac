@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Adds .bac/scripts to PATH in your shell rc file.
-# Usage: bash .bac/scripts/install.sh
+# Usage: bash .bac/setup/install.sh
 set -euo pipefail
 
-SCRIPTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../scripts" && pwd)"
 EXPORT_LINE="export PATH=\"\$PATH:$SCRIPTS_DIR\""
 
 detect_rc() {

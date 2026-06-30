@@ -167,6 +167,12 @@ action_install() {
     cp "$BAC_CLONE_DIR/.bac/$f" "$REPO/.bac/$f"
   done
 
+  mkdir -p "$REPO/.bac/scripts"
+  for script in bac-next-feat bac-next-sprint; do
+    cp "$BAC_CLONE_DIR/.bac/scripts/$script" "$REPO/.bac/scripts/$script"
+    chmod +x "$REPO/.bac/scripts/$script"
+  done
+
   cat > "$REPO/.bac/sprint-001/SPRINT.md" <<'EOF'
 ---
 status: OPEN
