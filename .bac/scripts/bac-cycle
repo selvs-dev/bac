@@ -178,13 +178,60 @@ action_install() {
 status: OPEN
 ---
 
-# Sprint 001 — <nome curto / versão>
+# Sprint 001 — Getting Started
 
-**Objetivo:** <o que este pacote entrega — resultado, não lista de tarefas>
+**Objetivo:** Configurar o projeto, definir contexto e criar as primeiras tarefas no BAC.
 
 ## Retrospectiva
 
 _(preencher ao fechar a sprint — 3 frases: bom, ruim, ajustar.)_
+EOF
+
+  cat > "$REPO/.bac/draft/FEAT-001-getting-started.md" <<'EOF'
+---
+priority: P1
+---
+
+<!-- BAC:FEATURE:DRAFT id=FEAT-001 -->
+
+> 📝 **`DRAFT`** — spec em construção, ainda não pode ser implementado
+
+# Getting Started
+
+## Contexto
+
+Este é o primeiro item do BAC neste repositório. Use-o como referência de
+formato ou substitua pelo seu primeiro item real.
+
+## Proposta
+
+Configurar o projeto: definir stack, ambientes, branches e primeiros passos
+de desenvolvimento.
+
+## Escopo
+
+### Dentro do escopo
+- Preencher `.bac/CONTEXT.md` com stack e arquitetura do projeto
+- Preencher `.bac/TEAM.md` com pessoas e agentes envolvidos
+- Criar `AGENTS.md` e `CLAUDE.md` na raiz do repositório
+
+### Fora do escopo
+- Qualquer implementação de funcionalidade real
+
+## Critérios de aceite
+
+- [ ] `CONTEXT.md` descreve a stack e os ambientes do projeto
+- [ ] `TEAM.md` lista as pessoas e seus papéis
+- [ ] `AGENTS.md` existe na raiz com instruções para agentes de IA
+
+## Como testar
+
+Abrir uma sessão do Claude Code e pedir "leia o AGENTS.md" — o agente deve
+entender o projeto sem explicação adicional.
+
+## Notas / decisões
+
+Substitua este item pelo seu primeiro item real quando estiver pronto.
 EOF
 
   echo ".bac instalado em $REPO"
