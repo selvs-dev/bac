@@ -1,0 +1,70 @@
+#!/usr/bin/env bash
+# Cria um arquivo de sugestão de refinamento para um item em draft/.
+# Uso: bac-refine <ID> [--repo <path>]
+set -euo pipefail
+
+ID=""
+REPO="."
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --repo) [[ -n "${2:-}" ]] || { echo "erro: --repo requer um valor" >&2; exit 1; }
+            REPO="$2"; shift 2 ;;
+    -*)     echo "uso: bac-refine <ID> [--repo <path>]" >&2; exit 1 ;;
+    *)      ID="$1"; shift ;;
+  esac
+done
+
+[[ -n "$ID" ]] || { echo "erro: ID obrigatório. Ex: bac-refine FEAT-001" >&2; exit 1; }
+[[ -d "$REPO" ]] && REPO="$(cd "$REPO" && pwd)"
+[[ -d "$REPO/.bac" ]] || { echo "erro: .bac não encontrado em $REPO" >&2; exit 1; }
+
+item=$(find "$REPO/.bac/draft" -maxdepth 1 -name "${ID}-*.md" 2>/dev/null | head -1)
+[[ -n "$item" ]] || { echo "erro: '$ID' não encontrado em draft/" >&2; exit 1; }
+
+out_dir="$REPO/.bac/refine"
+out="$out_dir/${ID}.md"
+
+if [[ -f "$out" ]]; then
+  echo "já existe: $out"
+  exit 0
+fi
+
+mkdir -p "$out_dir"
+
+title=$(grep "^# " "$item" | head -1 | sed 's/^# //')
+slug=$(basename "$item" .md)
+
+cat > "$out" <<EOF
+# Refinamento — ${ID}: ${title}
+
+Item: [${slug}.md](../draft/${slug}.md)
+
+---
+
+## Checklist de qualidade do spec
+
+- [ ] O **contexto** está claro? (por que este item existe, qual problema resolve?)
+- [ ] A **proposta** descreve O QUÊ fazer, não como?
+- [ ] O **escopo** lista explicitamente o que está FORA?
+- [ ] Os **critérios de aceite** são verificáveis e específicos?
+- [ ] O **como testar** tem passos concretos e reproduzíveis?
+
+## Perguntas em aberto
+
+- Quem é o usuário afetado por esta feature?
+- Existem dependências com outros itens?
+- Há riscos ou pontos de atenção técnica?
+- A prioridade está alinhada com a sprint atual?
+
+## Sugestões de melhoria
+
+_(preencher após análise — pode ficar vazio se o spec já estiver completo)_
+
+## Decisão
+
+- [ ] Spec aprovado — pode ser promovido para READY
+- [ ] Spec precisa de ajustes (descrever acima antes de promover)
+EOF
+
+echo "criado: $out"
