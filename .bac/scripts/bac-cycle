@@ -6,10 +6,10 @@ SCRIPTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 usage() {
   cat <<EOF
-Uso: bac-cycle --repo <path|.|url> [--agent <agente>] [ações...]
+Uso: bac-cycle [--repo <path|.|url>] [--agent <agente>] [ações...]
 
 Opções:
-  --repo          Caminho local, '.' para o diretório atual, ou URL do GitHub
+  --repo          Caminho local, '.' para o diretório atual, ou URL do GitHub (padrão: .)
   --agent         Agente executor: po | dev | qa (inferido pela ação se omitido)
   -h, --help      Exibe esta ajuda
 
@@ -35,8 +35,8 @@ die() {
 
 # --- parse args ---
 
-REPO=""
-REPO_ORIGINAL=""
+REPO="."
+REPO_ORIGINAL="."
 AGENT=""
 ACTIONS=()
 
@@ -60,7 +60,7 @@ done
 
 # --- validações ---
 
-[[ -n "$REPO" ]]           || die "--repo é obrigatório"
+[[ -n "$REPO" ]]           || REPO="."
 [[ ${#ACTIONS[@]} -gt 0 ]] || die "nenhuma ação especificada"
 
 is_valid_agent() {
