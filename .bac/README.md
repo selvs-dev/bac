@@ -8,39 +8,29 @@ Convenções, fluxo e templates: **[BAC.md](./BAC.md)**.
 .bac/
 ├─ BAC.md                    # convenções (fonte de verdade)
 ├─ README.md                 # este arquivo (bootstrap)
-├─ CONFIG.yaml               # config do sistema (duração default de sprint, etc.)
+├─ CONFIG.yaml               # config do sistema
 ├─ CONTEXT.md                # contexto do projeto (stack, arquitetura, decisões)
 ├─ TEAM.md                   # pessoas e agentes (@handles)
 ├─ TEMPLATE-FEATURE.md       # template pra criar uma FEAT
 ├─ TEMPLATE-BUG.md           # template pra criar um BUG
 │
-├─ DRAFT.md                  # índice — itens em construção (spec não aprovado)
-├─ BACKLOG.md                # índice — itens READY aguardando sprint
-├─ SPRINT-NNN.md             # índice — itens de uma sprint (um arquivo por sprint)
-│
-└─ YYYY/MM/                  # arquivos físicos — criados aqui, nunca movidos
-   └─ FEAT-NNN-<slug>.md
+├─ draft/                    # itens em construção (spec não aprovado)
+├─ backlog/                  # itens READY aguardando sprint
+└─ sprint-NNN/               # uma pasta por sprint
+   ├─ SPRINT.md              # metadados: objetivo e retrospectiva
+   └─ FEAT-NNN-<slug>.md     # itens da sprint
 ```
 
-**O arquivo nunca muda de pasta.** A transição de estado muda apenas em qual
-índice o item aparece:
+**A pasta é o estado.** O arquivo move entre pastas via `git mv`:
 
 ```
-criado  → DRAFT.md
-READY   → sai de DRAFT.md, entra em BACKLOG.md
-sprint  → sai de BACKLOG.md, entra em SPRINT-NNN.md
+criado       → draft/
+READY        → sai de draft/, entra em backlog/
+sprint       → sai de backlog/, entra em sprint-NNN/
 ```
 
-Sprint status é explícito no front-matter do `SPRINT-NNN.md`:
-
-```yaml
----
-status: OPEN     # OPEN | CLOSED
----
-```
-
-Sprint não tem timebox — é um pacote de features fechado pelo usuário quando ele decide.
-`OPEN` é o padrão; `CLOSED` é atualizado manualmente ao encerrar.
+Dentro da sprint, o status detalhado (READY → IN_PROGRESS → REVIEW → DONE)
+fica na tag BAC dentro do próprio arquivo.
 
 ---
 
@@ -51,9 +41,7 @@ Sprint não tem timebox — é um pacote de features fechado pelo usuário quand
 Copie a pasta inteira pro novo repo. Antes de commitar, limpe o que era
 específico do projeto anterior:
 
-- Apague tudo dentro de `.bac/YYYY/MM/` (os itens antigos).
-- Esvazie as tabelas de `DRAFT.md` e `BACKLOG.md` (mantendo o cabeçalho).
-- Apague os `SPRINT-NNN.md` existentes (ou use como template para o primeiro).
+- Esvazie `draft/`, `backlog/` e as pastas `sprint-NNN/` (exceto `SPRINT.md`).
 - Mantenha intactos: `BAC.md`, `README.md`, `TEAM.md`, `CONFIG.yaml`,
   `TEMPLATE-FEATURE.md`, `TEMPLATE-BUG.md`.
 
@@ -109,9 +97,9 @@ com PR draft de volta pra `develop`. Nunca push direto.
 Toda tarefa vive como markdown em [`.bac/`](./.bac/). Leia
 [`.bac/BAC.md`](./.bac/BAC.md) antes de qualquer implementação.
 
-- [`.bac/DRAFT.md`](./.bac/DRAFT.md) — itens em construção
-- [`.bac/BACKLOG.md`](./.bac/BACKLOG.md) — itens prontos pra sprint
-- [`.bac/SPRINT-NNN.md`](./.bac/) — itens da sprint corrente
+- [`.bac/draft/`](./.bac/draft/) — itens em construção
+- [`.bac/backlog/`](./.bac/backlog/) — itens prontos pra sprint
+- [`.bac/sprint-NNN/`](./.bac/) — pasta da sprint corrente
 - [`.bac/TEAM.md`](./.bac/TEAM.md) — pessoas e agentes
 
 ## Regras absolutas
@@ -119,7 +107,7 @@ Toda tarefa vive como markdown em [`.bac/`](./.bac/). Leia
 - **PR draft sempre.** Nunca mergeie sem aprovação humana.
 - **Nunca pushe direto** em `main` ou `develop`.
 - **Só `READY` libera implementação.** `DRAFT` ou ausência de tag → recuse.
-- **Arquivo físico nunca move.** Estado muda nos índices, não na pasta.
+- **A pasta é o estado.** Mover o arquivo = mudar de fase.
 - **Se o spec estiver ambíguo**, pergunte antes de implementar.
 
 ## Desenvolvimento local
@@ -131,4 +119,4 @@ Toda tarefa vive como markdown em [`.bac/`](./.bac/). Leia
 
 - Commitar tudo: `.bac/` + `AGENTS.md` + `CLAUDE.md` + `.github/copilot-instructions.md`.
 - Abrir uma sessão do Claude Code e pedir "leia o AGENTS.md" — deve confirmar
-  o fluxo BAC (índices, nunca mover arquivos) sem você explicar nada.
+  o fluxo BAC (pastas como estado) sem você explicar nada.

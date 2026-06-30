@@ -1,6 +1,5 @@
 <!--
-Copie para .bac/YYYY/MM/BUG-NNN-<slug>.md e preencha.
-Adicione a referência em .bac/DRAFT.md.
+Copie para .bac/draft/BUG-NNN-<slug>.md e preencha.
 Convenções: ../BAC.md.
 -->
 

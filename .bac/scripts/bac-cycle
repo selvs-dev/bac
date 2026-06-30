@@ -1,0 +1,197 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+VALID_PROFILES=(dev qa prod)
+SCRIPTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+usage() {
+  cat <<EOF
+Uso: bac-cycle --repo <path|.|url> --profile <perfil> [ações...]
+
+Opções:
+  --repo     Caminho local, '.' para o diretório atual, ou URL do GitHub
+  --profile  Perfil de execução: dev | qa | prod
+  -h, --help Exibe esta ajuda
+
+Ações (podem ser combinadas):
+  --install  Instala o .bac no repositório
+  --status   Exibe próxima feature e próxima sprint disponíveis
+
+Exemplos:
+  bac-cycle --repo . --profile dev --status
+  bac-cycle --repo byselvs/workspace --profile qa --install --status
+EOF
+}
+
+die() {
+  echo "erro: $*" >&2
+  echo "" >&2
+  usage >&2
+  exit 1
+}
+
+# --- parse args ---
+
+REPO=""
+REPO_ORIGINAL=""
+PROFILE=""
+ACTIONS=()
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --repo)
+      [[ -n "${2:-}" ]] || die "--repo requer um valor"
+      REPO="$2"; REPO_ORIGINAL="$2"; shift 2 ;;
+    --profile)
+      [[ -n "${2:-}" ]] || die "--profile requer um valor"
+      PROFILE="$2"; shift 2 ;;
+    --install) ACTIONS+=(install); shift ;;
+    --status)  ACTIONS+=(status);  shift ;;
+    -h|--help) usage; exit 0 ;;
+    *)         die "argumento desconhecido: $1" ;;
+  esac
+done
+
+# --- validações ---
+
+[[ -n "$REPO" ]]           || die "--repo é obrigatório"
+[[ -n "$PROFILE" ]]        || die "--profile é obrigatório"
+[[ ${#ACTIONS[@]} -gt 0 ]] || die "nenhuma ação especificada"
+
+is_valid_profile() {
+  local p="$1"
+  for valid in "${VALID_PROFILES[@]}"; do
+    [[ "$p" == "$valid" ]] && return 0
+  done
+  return 1
+}
+
+is_valid_profile "$PROFILE" || die "perfil inválido: '$PROFILE'. Use: ${VALID_PROFILES[*]}"
+
+# --- setup do repositório ---
+
+CLONED_DIR=""
+BAC_CLONE_DIR=""
+
+cleanup() {
+  if [[ -n "$CLONED_DIR" ]]; then
+    rm -rf "$CLONED_DIR"
+  fi
+  if [[ -n "$BAC_CLONE_DIR" ]]; then
+    rm -rf "$BAC_CLONE_DIR"
+  fi
+}
+trap cleanup EXIT
+
+to_https_url() {
+  local input="$1"
+  if [[ "$input" =~ ^git@github\.com:(.+)$ ]]; then
+    echo "https://github.com/${BASH_REMATCH[1]}"
+  else
+    echo "$input"
+  fi
+}
+
+to_ssh_url() {
+  local input="$1"
+  if [[ "$input" =~ ^git@github\.com: ]]; then
+    echo "$input"
+  elif [[ "$input" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]; then
+    echo "git@github.com:${input}.git"
+  elif [[ "$input" =~ ^https://github\.com/(.+)$ ]]; then
+    local path="${BASH_REMATCH[1]%.git}"
+    echo "git@github.com:${path}.git"
+  fi
+}
+
+if [[ "$REPO" == "." ]]; then
+  REPO="$(pwd)"
+elif [[ ! -d "$REPO" ]]; then
+  SSH_URL="$(to_ssh_url "$REPO")"
+  [[ -n "$SSH_URL" ]] || die "valor inválido para --repo: $REPO"
+  echo "clonando $SSH_URL..."
+  CLONED_DIR="$(mktemp -d)"
+  git clone --depth 1 "$SSH_URL" "$CLONED_DIR" || die "falha ao clonar: $SSH_URL"
+  REPO="$CLONED_DIR"
+fi
+
+[[ -d "$REPO" ]]      || die "repositório não encontrado: $REPO"
+[[ -d "$REPO/.git" ]] || die "não é um repositório git: $REPO"
+
+# --- verificação do .bac ---
+
+has_install_action() {
+  local a
+  for a in "${ACTIONS[@]}"; do
+    [[ "$a" == "install" ]] && return 0
+  done
+  return 1
+}
+
+if [[ ! -d "$REPO/.bac" ]]; then
+  if has_install_action; then
+    : # deixa o action_install criar o .bac
+  else
+    echo "este repositório não tem .bac instalado." >&2
+    echo "" >&2
+    echo "execute novamente com --install:" >&2
+    echo "" >&2
+    echo "  bac-cycle --repo $REPO_ORIGINAL --profile $PROFILE --install ${ACTIONS[*]/#/--}" >&2
+    exit 1
+  fi
+fi
+
+# --- ações ---
+
+action_install() {
+  if [[ -d "$REPO/.bac" ]]; then
+    echo ".bac já existe em $REPO — pulando instalação"
+    return
+  fi
+
+  local bac_url bac_url_https
+  bac_url="$(git -C "$SCRIPTS_DIR" remote get-url origin 2>/dev/null)" \
+    || die "não foi possível determinar a URL do repositório bac"
+  bac_url_https="$(to_https_url "$bac_url")"
+
+  echo "clonando bac de $bac_url_https..."
+  BAC_CLONE_DIR="$(mktemp -d)"
+  git clone --depth 1 "$bac_url_https" "$BAC_CLONE_DIR" \
+    || die "falha ao clonar o repositório bac"
+
+  echo "instalando .bac em $REPO..."
+
+  mkdir -p "$REPO/.bac/draft" "$REPO/.bac/backlog" "$REPO/.bac/sprint-001"
+
+  for f in BAC.md README.md CONFIG.yaml CONTEXT.md TEAM.md TEMPLATE-FEATURE.md TEMPLATE-BUG.md; do
+    cp "$BAC_CLONE_DIR/.bac/$f" "$REPO/.bac/$f"
+  done
+
+  cat > "$REPO/.bac/sprint-001/SPRINT.md" <<'EOF'
+---
+status: OPEN
+---
+
+# Sprint 001 — <nome curto / versão>
+
+**Objetivo:** <o que este pacote entrega — resultado, não lista de tarefas>
+
+## Retrospectiva
+
+_(preencher ao fechar a sprint — 3 frases: bom, ruim, ajustar.)_
+EOF
+
+  echo ".bac instalado em $REPO"
+}
+
+action_status() {
+  echo "próxima feature: $("$SCRIPTS_DIR/bac-next-feat" --repo "$REPO")"
+  echo "próxima sprint:  $("$SCRIPTS_DIR/bac-next-sprint" --repo "$REPO")"
+}
+
+for action in "${ACTIONS[@]}"; do
+  case "$action" in
+    install) action_install ;;
+    status)  action_status  ;;
+  esac
+done
