@@ -1,0 +1,282 @@
+#!/usr/bin/env bash
+# CLI manual do BAC — comandos executados pelo usuário dentro do repositório.
+# Uso: bac <subcomando> [opções] [argumentos]
+set -euo pipefail
+
+SCRIPTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+usage() {
+  cat <<EOF
+Uso: bac <subcomando> [opções] [argumentos]
+
+Subcomandos:
+  install            Instala o .bac no repositório atual
+  refine <ID>        Cria arquivo de sugestão de refinamento para um item em draft
+  status             Exibe estado atual do backlog
+
+Opções:
+  --repo <path>      Repositório alvo (padrão: diretório atual)
+  --agent <agente>   Agente executor: po | dev | qa
+  -h, --help         Exibe esta ajuda
+
+Exemplos:
+  bac install --agent po
+  bac refine FEAT-001 --agent po
+  bac status --agent dev
+  bac refine FEAT-001 --repo /outro/repo --agent po
+EOF
+}
+
+die() { echo "erro: $*" >&2; echo "" >&2; usage >&2; exit 1; }
+
+[[ $# -gt 0 ]] || { usage; exit 0; }
+
+SUBCMD="$1"; shift
+
+# --- parse flags compartilhados ---
+
+REPO="."
+AGENT=""
+ARGS=()
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --repo)    [[ -n "${2:-}" ]] || die "--repo requer um valor";  REPO="$2";  shift 2 ;;
+    --agent)   [[ -n "${2:-}" ]] || die "--agent requer um valor"; AGENT="$2"; shift 2 ;;
+    -h|--help) usage; exit 0 ;;
+    -*)        die "opção desconhecida: $1" ;;
+    *)         ARGS+=("$1"); shift ;;
+  esac
+done
+
+[[ -n "$AGENT" ]] || die "--agent é obrigatório"
+
+VALID_AGENTS=(po dev qa)
+is_valid_agent() {
+  local a="$1"
+  for v in "${VALID_AGENTS[@]}"; do [[ "$a" == "$v" ]] && return 0; done
+  return 1
+}
+is_valid_agent "$AGENT" || die "agente inválido: '$AGENT'. Use: ${VALID_AGENTS[*]}"
+
+# --- resolução do repositório ---
+
+CLONED_DIR=""
+cleanup() { if [[ -n "$CLONED_DIR" ]]; then rm -rf "$CLONED_DIR"; fi; }
+trap cleanup EXIT
+
+to_ssh_url() {
+  local input="$1"
+  if [[ "$input" =~ ^git@github\.com: ]]; then
+    echo "$input"
+  elif [[ "$input" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*/[A-Za-z0-9][A-Za-z0-9_.-]*$ ]]; then
+    echo "git@github.com:${input}.git"
+  elif [[ "$input" =~ ^https://github\.com/(.+)$ ]]; then
+    local path="${BASH_REMATCH[1]%.git}"
+    echo "git@github.com:${path}.git"
+  fi
+}
+
+is_local_path() {
+  [[ "$1" == "."   ]] || [[ "$1" == "./"* ]] || [[ "$1" == "/"* ]] || [[ -d "$1" ]]
+}
+
+if is_local_path "$REPO"; then
+  [[ -d "$REPO" ]] || die "repositório não encontrado: $REPO"
+  REPO="$(cd "$REPO" && pwd)"
+else
+  SSH_URL="$(to_ssh_url "$REPO")"
+  [[ -n "$SSH_URL" ]] || die "valor inválido para --repo: $REPO"
+  echo "clonando $SSH_URL..."
+  CLONED_DIR="$(mktemp -d)"
+  git clone --depth 1 "$SSH_URL" "$CLONED_DIR" || die "falha ao clonar: $SSH_URL"
+  REPO="$CLONED_DIR"
+fi
+
+[[ -d "$REPO/.git" ]] || die "não é um repositório git: $REPO"
+
+# --- subcomandos ---
+
+cmd_install() {
+  [[ "$AGENT" == "po" || "$AGENT" == "dev" ]] \
+    || die "agente '$AGENT' não tem permissão para: install"
+  [[ -d "$REPO/.bac" ]] && { echo ".bac já existe em $REPO"; return; }
+
+  local bac_url bac_url_https
+  bac_url="$(git -C "$SCRIPTS_DIR" remote get-url origin 2>/dev/null)" \
+    || die "não foi possível determinar a URL do repositório bac"
+  bac_url_https="${bac_url/git@github.com:/https://github.com/}"
+  bac_url_https="${bac_url_https%.git}.git"
+
+  echo "clonando bac de $bac_url_https..."
+  local bac_clone
+  bac_clone="$(mktemp -d)"
+  git clone --depth 1 "$bac_url_https" "$bac_clone" || die "falha ao clonar o repositório bac"
+
+  echo "instalando .bac em $REPO..."
+  mkdir -p "$REPO/.bac/draft" "$REPO/.bac/backlog" "$REPO/.bac/sprint-001" "$REPO/.bac/refine"
+
+  for f in BAC.md README.md CONFIG.yaml CONTEXT.md TEAM.md TEMPLATE-FEATURE.md TEMPLATE-BUG.md; do
+    cp "$bac_clone/.bac/$f" "$REPO/.bac/$f"
+  done
+
+  mkdir -p "$REPO/.bac/scripts"
+  for script in bac-next-feat bac-next-sprint bac; do
+    cp "$bac_clone/.bac/scripts/$script" "$REPO/.bac/scripts/$script"
+    chmod +x "$REPO/.bac/scripts/$script"
+  done
+
+  cat > "$REPO/.bac/sprint-001/SPRINT.md" <<'EOF'
+---
+status: OPEN
+---
+
+# Sprint 001 — Getting Started
+
+**Objetivo:** Configurar o projeto, definir contexto e criar as primeiras tarefas no BAC.
+
+## Retrospectiva
+
+_(preencher ao fechar a sprint — 3 frases: bom, ruim, ajustar.)_
+EOF
+
+  cat > "$REPO/.bac/draft/FEAT-001-getting-started.md" <<'EOF'
+---
+priority: P1
+---
+
+<!-- BAC:FEATURE:DRAFT id=FEAT-001 -->
+
+> 📝 **`DRAFT`** — spec em construção, ainda não pode ser implementado
+
+# Getting Started
+
+## Contexto
+
+Este é o primeiro item do BAC neste repositório. Use-o como referência de
+formato ou substitua pelo seu primeiro item real.
+
+## Proposta
+
+Configurar o projeto: definir stack, ambientes, branches e primeiros passos
+de desenvolvimento.
+
+## Escopo
+
+### Dentro do escopo
+- Preencher `.bac/CONTEXT.md` com stack e arquitetura do projeto
+- Preencher `.bac/TEAM.md` com pessoas e agentes envolvidos
+- Criar `AGENTS.md` e `CLAUDE.md` na raiz do repositório
+
+### Fora do escopo
+- Qualquer implementação de funcionalidade real
+
+## Critérios de aceite
+
+- [ ] `CONTEXT.md` descreve a stack e os ambientes do projeto
+- [ ] `TEAM.md` lista as pessoas e seus papéis
+- [ ] `AGENTS.md` existe na raiz com instruções para agentes de IA
+
+## Como testar
+
+Abrir uma sessão do Claude Code e pedir "leia o AGENTS.md" — o agente deve
+entender o projeto sem explicação adicional.
+
+## Notas / decisões
+
+Substitua este item pelo seu primeiro item real quando estiver pronto.
+EOF
+
+  rm -rf "$bac_clone"
+  echo ".bac instalado em $REPO"
+}
+
+cmd_refine() {
+  [[ "$AGENT" == "po" ]] || die "agente '$AGENT' não tem permissão para: refine"
+  local id="${ARGS[0]:-}"
+  [[ -n "$id" ]] || die "refine requer um ID. Ex: bac refine FEAT-001"
+  [[ -d "$REPO/.bac" ]] || die "repositório sem .bac — rode 'bac install' primeiro"
+
+  local item
+  item=$(find "$REPO/.bac/draft" -maxdepth 1 -name "${id}-*.md" 2>/dev/null | head -1)
+  [[ -n "$item" ]] || die "'$id' não encontrado em draft/"
+
+  local out="$REPO/.bac/refine/${id}.md"
+  if [[ -f "$out" ]]; then
+    echo "já existe: $out"
+    return
+  fi
+
+  mkdir -p "$REPO/.bac/refine"
+  local title slug
+  title=$(grep "^# " "$item" | head -1 | sed 's/^# //')
+  slug=$(basename "$item" .md)
+
+  cat > "$out" <<EOF
+# Refinamento — ${id}: ${title}
+
+Item: [${slug}.md](../draft/${slug}.md)
+
+---
+
+## Checklist de qualidade do spec
+
+- [ ] O **contexto** está claro? (por que este item existe, qual problema resolve?)
+- [ ] A **proposta** descreve O QUÊ fazer, não como?
+- [ ] O **escopo** lista explicitamente o que está FORA?
+- [ ] Os **critérios de aceite** são verificáveis e específicos?
+- [ ] O **como testar** tem passos concretos e reproduzíveis?
+
+## Perguntas em aberto
+
+- Quem é o usuário afetado por esta feature?
+- Existem dependências com outros itens?
+- Há riscos ou pontos de atenção técnica?
+- A prioridade está alinhada com a sprint atual?
+
+## Sugestões de melhoria
+
+_(preencher após análise — pode ficar vazio se o spec já estiver completo)_
+
+## Decisão
+
+- [ ] Spec aprovado — pode ser promovido para READY
+- [ ] Spec precisa de ajustes (descrever acima antes de promover)
+EOF
+
+  echo "criado: $out"
+}
+
+cmd_status() {
+  [[ -d "$REPO/.bac" ]] || die "repositório sem .bac — rode 'bac install' primeiro"
+
+  local n_draft n_backlog
+  n_draft=$(find "$REPO/.bac/draft"   -maxdepth 1 -name "*.md" 2>/dev/null | wc -l | tr -d ' ')
+  n_backlog=$(find "$REPO/.bac/backlog" -maxdepth 1 -name "*.md" 2>/dev/null | wc -l | tr -d ' ')
+
+  local open_sprint=""
+  open_sprint=$(grep -rl "status: OPEN" "$REPO/.bac"/sprint-*/SPRINT.md 2>/dev/null | head -1 || true)
+
+  local sprint_label="—" n_sprint=0 n_ready=0
+  if [[ -n "$open_sprint" ]]; then
+    local sprint_dir
+    sprint_dir="$(dirname "$open_sprint")"
+    sprint_label="$(basename "$sprint_dir")"
+    n_sprint=$(find "$sprint_dir" -maxdepth 1 -name "*.md" ! -name "SPRINT.md" 2>/dev/null | wc -l | tr -d ' ')
+    n_ready=$(grep -rl "BAC:.*:READY" "$sprint_dir" 2>/dev/null | grep -v "SPRINT.md" | wc -l | tr -d ' ' || true)
+  fi
+
+  echo "draft:           $n_draft item(s)"
+  echo "backlog:         $n_backlog item(s)"
+  echo "$sprint_label:   $n_sprint item(s) | $n_ready ready"
+  echo "---"
+  echo "próxima feature: $("$SCRIPTS_DIR/bac-next-feat" --repo "$REPO")"
+  echo "próxima sprint:  $("$SCRIPTS_DIR/bac-next-sprint" --repo "$REPO")"
+}
+
+case "$SUBCMD" in
+  install) cmd_install ;;
+  refine)  cmd_refine  ;;
+  status)  cmd_status  ;;
+  *)       die "subcomando desconhecido: '$SUBCMD'" ;;
+esac
