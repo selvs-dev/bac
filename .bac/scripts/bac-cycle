@@ -1,25 +1,25 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-VALID_PROFILES=(dev qa prod)
+VALID_AGENTS=(dev qa)
 SCRIPTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 usage() {
   cat <<EOF
-Uso: bac-cycle --repo <path|.|url> --profile <perfil> [ações...]
+Uso: bac-cycle --repo <path|.|url> --agent <agente> [ações...]
 
 Opções:
   --repo     Caminho local, '.' para o diretório atual, ou URL do GitHub
-  --profile  Perfil de execução: dev | qa | prod
+  --agent    Agente executor: dev | qa
   -h, --help Exibe esta ajuda
 
 Ações (podem ser combinadas):
   --install  Instala o .bac no repositório
-  --status   Exibe próxima feature e próxima sprint disponíveis
+  --status   Exibe estado atual do backlog e próximos números disponíveis
 
 Exemplos:
-  bac-cycle --repo . --profile dev --status
-  bac-cycle --repo byselvs/workspace --profile qa --install --status
+  bac-cycle --repo . --agent dev --status
+  bac-cycle --repo byselvs/workspace --agent dev --install --status
 EOF
 }
 
@@ -34,7 +34,7 @@ die() {
 
 REPO=""
 REPO_ORIGINAL=""
-PROFILE=""
+AGENT=""
 ACTIONS=()
 
 while [[ $# -gt 0 ]]; do
@@ -42,9 +42,9 @@ while [[ $# -gt 0 ]]; do
     --repo)
       [[ -n "${2:-}" ]] || die "--repo requer um valor"
       REPO="$2"; REPO_ORIGINAL="$2"; shift 2 ;;
-    --profile)
-      [[ -n "${2:-}" ]] || die "--profile requer um valor"
-      PROFILE="$2"; shift 2 ;;
+    --agent)
+      [[ -n "${2:-}" ]] || die "--agent requer um valor"
+      AGENT="$2"; shift 2 ;;
     --install) ACTIONS+=(install); shift ;;
     --status)  ACTIONS+=(status);  shift ;;
     -h|--help) usage; exit 0 ;;
@@ -55,18 +55,18 @@ done
 # --- validações ---
 
 [[ -n "$REPO" ]]           || die "--repo é obrigatório"
-[[ -n "$PROFILE" ]]        || die "--profile é obrigatório"
+[[ -n "$AGENT" ]]          || die "--agent é obrigatório"
 [[ ${#ACTIONS[@]} -gt 0 ]] || die "nenhuma ação especificada"
 
-is_valid_profile() {
-  local p="$1"
-  for valid in "${VALID_PROFILES[@]}"; do
-    [[ "$p" == "$valid" ]] && return 0
+is_valid_agent() {
+  local a="$1"
+  for valid in "${VALID_AGENTS[@]}"; do
+    [[ "$a" == "$valid" ]] && return 0
   done
   return 1
 }
 
-is_valid_profile "$PROFILE" || die "perfil inválido: '$PROFILE'. Use: ${VALID_PROFILES[*]}"
+is_valid_agent "$AGENT" || die "agente inválido: '$AGENT'. Use: ${VALID_AGENTS[*]}"
 
 # --- setup do repositório ---
 
@@ -144,7 +144,7 @@ if [[ ! -d "$REPO/.bac" ]]; then
     echo "" >&2
     echo "execute novamente com --install:" >&2
     echo "" >&2
-    echo "  bac-cycle --repo $REPO_ORIGINAL --profile $PROFILE --install ${ACTIONS[*]/#/--}" >&2
+    echo "  bac-cycle --repo $REPO_ORIGINAL --agent $AGENT --install ${ACTIONS[*]/#/--}" >&2
     exit 1
   fi
 fi
