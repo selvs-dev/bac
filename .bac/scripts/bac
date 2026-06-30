@@ -31,12 +31,11 @@ die() { echo "erro: $*" >&2; echo "" >&2; usage >&2; exit 1; }
 
 [[ $# -gt 0 ]] || { usage; exit 0; }
 
-SUBCMD="$1"; shift
-
-# --- parse flags compartilhados ---
+# --- parse completo em uma passagem (flags e subcomando em qualquer ordem) ---
 
 REPO="."
 AGENT=""
+SUBCMD=""
 ARGS=()
 
 while [[ $# -gt 0 ]]; do
@@ -45,11 +44,18 @@ while [[ $# -gt 0 ]]; do
     --agent)   [[ -n "${2:-}" ]] || die "--agent requer um valor"; AGENT="$2"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     -*)        die "opção desconhecida: $1" ;;
-    *)         ARGS+=("$1"); shift ;;
+    *)
+      if [[ -z "$SUBCMD" ]]; then
+        SUBCMD="$1"
+      else
+        ARGS+=("$1")
+      fi
+      shift ;;
   esac
 done
 
-[[ -n "$AGENT" ]] || die "--agent é obrigatório"
+[[ -n "$SUBCMD" ]] || die "subcomando obrigatório"
+[[ -n "$AGENT" ]]  || die "--agent é obrigatório"
 
 VALID_AGENTS=(po dev qa)
 is_valid_agent() {
