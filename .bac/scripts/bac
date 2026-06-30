@@ -215,33 +215,14 @@ cmd_refine() {
   cat > "$out" <<EOF
 # Refinamento — ${id}: ${title}
 
+> Este arquivo será lido pela IA no próximo ciclo de refinamento.
+> Escreva abaixo suas notas, considerações ou ajustes que quer que ela aplique na história.
+
 Item: [${slug}.md](./${slug}.md)
 
 ---
 
-## Checklist de qualidade do spec
 
-- [ ] O **contexto** está claro? (por que este item existe, qual problema resolve?)
-- [ ] A **proposta** descreve O QUÊ fazer, não como?
-- [ ] O **escopo** lista explicitamente o que está FORA?
-- [ ] Os **critérios de aceite** são verificáveis e específicos?
-- [ ] O **como testar** tem passos concretos e reproduzíveis?
-
-## Perguntas em aberto
-
-- Quem é o usuário afetado por esta feature?
-- Existem dependências com outros itens?
-- Há riscos ou pontos de atenção técnica?
-- A prioridade está alinhada com a sprint atual?
-
-## Sugestões de melhoria
-
-_(preencher após análise — pode ficar vazio se o spec já estiver completo)_
-
-## Decisão
-
-- [ ] Spec aprovado — pode ser promovido para READY
-- [ ] Spec precisa de ajustes (descrever acima antes de promover)
 EOF
 
   echo "criado: $out"
