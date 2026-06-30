@@ -155,6 +155,12 @@ if [[ ! -d "$REPO/.bac" ]]; then
   fi
 fi
 
+# --- helpers ---
+
+refine_has_content() {
+  awk '/^---$/{found=1; next} found && /\S/{has=1} END{exit !has}' "$1"
+}
+
 # --- permissões por agente ---
 
 agent_can() {
@@ -364,15 +370,17 @@ action_status() {
     n_ready=$(grep -rl "BAC:.*:READY" "$sprint_dir" 2>/dev/null | grep -v "SPRINT.md" | wc -l | tr -d ' ' || true)
   fi
 
-  local refine_ids=()
-  while IFS= read -r id; do
+  local refine_ids=() seen=""
+  while IFS= read -r f; do
+    refine_has_content "$f" || continue
+    local id
+    id="$(basename "$f" | grep -oP '^FEAT-[0-9]+')"
+    [[ -n "$id" && "$seen" != *"|$id|"* ]] || continue
+    seen="$seen|$id|"
     refine_ids+=("$id")
   done < <(find "$bac/draft" -maxdepth 1 \
     -name "*-[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]-[0-9][0-9][0-9][0-9].md" \
-    2>/dev/null \
-    | xargs -I{} basename {} \
-    | grep -oP '^FEAT-[0-9]+' \
-    | sort -u)
+    2>/dev/null | sort)
   local n_refine=${#refine_ids[@]}
 
   echo "draft:           $n_draft item(s)"
