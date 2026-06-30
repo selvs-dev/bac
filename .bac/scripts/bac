@@ -116,7 +116,7 @@ cmd_install() {
   git clone --depth 1 "$bac_url_https" "$bac_clone" || die "falha ao clonar o repositório bac"
 
   echo "instalando .bac em $REPO..."
-  mkdir -p "$REPO/.bac/draft" "$REPO/.bac/backlog" "$REPO/.bac/sprint-001" "$REPO/.bac/refine"
+  mkdir -p "$REPO/.bac/draft" "$REPO/.bac/backlog" "$REPO/.bac/sprint-001"
 
   for f in BAC.md README.md CONFIG.yaml CONTEXT.md TEAM.md TEMPLATE-FEATURE.md TEMPLATE-BUG.md; do
     cp "$bac_clone/.bac/$f" "$REPO/.bac/$f"
@@ -199,16 +199,15 @@ cmd_refine() {
   [[ -d "$REPO/.bac" ]] || die "repositório sem .bac — rode 'bac install' primeiro"
 
   local item
-  item=$(find "$REPO/.bac/draft" -maxdepth 1 -name "${id}-*.md" 2>/dev/null | head -1)
+  item=$(find "$REPO/.bac/draft" -maxdepth 1 -name "${id}-*.md" \
+    ! -name "*-[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]-[0-9][0-9][0-9][0-9].md" \
+    2>/dev/null | head -1)
   [[ -n "$item" ]] || die "'$id' não encontrado em draft/"
 
-  local out="$REPO/.bac/refine/${id}.md"
-  if [[ -f "$out" ]]; then
-    echo "já existe: $out"
-    return
-  fi
+  local ts out
+  ts="$(date +%Y%m%d-%H%M)"
+  out="$REPO/.bac/draft/${id}-${ts}.md"
 
-  mkdir -p "$REPO/.bac/refine"
   local title slug
   title=$(grep "^# " "$item" | head -1 | sed 's/^# //')
   slug=$(basename "$item" .md)
@@ -216,7 +215,7 @@ cmd_refine() {
   cat > "$out" <<EOF
 # Refinamento — ${id}: ${title}
 
-Item: [${slug}.md](../draft/${slug}.md)
+Item: [${slug}.md](./${slug}.md)
 
 ---
 
@@ -252,7 +251,9 @@ cmd_status() {
   [[ -d "$REPO/.bac" ]] || die "repositório sem .bac — rode 'bac install' primeiro"
 
   local n_draft n_backlog
-  n_draft=$(find "$REPO/.bac/draft"   -maxdepth 1 -name "*.md" 2>/dev/null | wc -l | tr -d ' ')
+  n_draft=$(find "$REPO/.bac/draft" -maxdepth 1 -name "*.md" \
+    ! -name "*-[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]-[0-9][0-9][0-9][0-9].md" \
+    2>/dev/null | wc -l | tr -d ' ')
   n_backlog=$(find "$REPO/.bac/backlog" -maxdepth 1 -name "*.md" 2>/dev/null | wc -l | tr -d ' ')
 
   local open_sprint=""
