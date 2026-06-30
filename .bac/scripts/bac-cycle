@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-VALID_AGENTS=(dev qa)
+VALID_AGENTS=(po dev qa)
 SCRIPTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 usage() {
@@ -9,15 +9,18 @@ usage() {
 Uso: bac-cycle --repo <path|.|url> --agent <agente> [ações...]
 
 Opções:
-  --repo     Caminho local, '.' para o diretório atual, ou URL do GitHub
-  --agent    Agente executor: dev | qa
-  -h, --help Exibe esta ajuda
+  --repo          Caminho local, '.' para o diretório atual, ou URL do GitHub
+  --agent         Agente executor: po | dev | qa
+  -h, --help      Exibe esta ajuda
 
-Ações (podem ser combinadas):
-  --install  Instala o .bac no repositório
-  --status   Exibe estado atual do backlog e próximos números disponíveis
+Ações por agente:
+  todos:          --install  --status
+  po:             --refine <ID>
+  dev:            (em breve: --run)
+  qa:             (em breve: --review)
 
 Exemplos:
+  bac-cycle --repo . --agent po --refine FEAT-001
   bac-cycle --repo . --agent dev --status
   bac-cycle --repo byselvs/workspace --agent dev --install --status
 EOF
@@ -45,8 +48,11 @@ while [[ $# -gt 0 ]]; do
     --agent)
       [[ -n "${2:-}" ]] || die "--agent requer um valor"
       AGENT="$2"; shift 2 ;;
-    --install) ACTIONS+=(install); shift ;;
-    --status)  ACTIONS+=(status);  shift ;;
+    --install)       ACTIONS+=(install);          shift ;;
+    --status)        ACTIONS+=(status);           shift ;;
+    --refine)
+      [[ -n "${2:-}" ]] || die "--refine requer um ID (ex: FEAT-001)"
+      ACTIONS+=("refine:$2");                     shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *)         die "argumento desconhecido: $1" ;;
   esac
@@ -149,6 +155,22 @@ if [[ ! -d "$REPO/.bac" ]]; then
   fi
 fi
 
+# --- permissões por agente ---
+
+agent_can() {
+  local action="$1"
+  case "$AGENT" in
+    po)  [[ "$action" == install || "$action" == status || "$action" == refine ]] ;;
+    dev) [[ "$action" == install || "$action" == status ]] ;;
+    qa)  [[ "$action" == install || "$action" == status ]] ;;
+  esac
+}
+
+for action in "${ACTIONS[@]}"; do
+  action_type="${action%%:*}"
+  agent_can "$action_type" || die "agente '$AGENT' não tem permissão para: --$action_type"
+done
+
 # --- ações ---
 
 action_install() {
@@ -245,6 +267,16 @@ EOF
   echo ".bac instalado em $REPO"
 }
 
+action_refine() {
+  local id="$1"
+  local item
+  item=$(find "$REPO/.bac/draft" -maxdepth 1 -name "${id}-*.md" 2>/dev/null | head -1)
+  [[ -n "$item" ]] || die "item '$id' não encontrado em draft/"
+
+  echo "refinando $id: $item"
+  cat "$item"
+}
+
 action_status() {
   local bac="$REPO/.bac"
 
@@ -273,8 +305,11 @@ action_status() {
 }
 
 for action in "${ACTIONS[@]}"; do
-  case "$action" in
+  action_type="${action%%:*}"
+  action_arg="${action#*:}"
+  case "$action_type" in
     install) action_install ;;
     status)  action_status  ;;
+    refine)  action_refine "$action_arg" ;;
   esac
 done
