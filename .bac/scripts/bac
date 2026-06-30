@@ -15,16 +15,16 @@ Opções:
   -h, --help         Exibe esta ajuda
 
 Comandos e agente padrão:
-  --install          po   — instala o .bac no repositório
-  --refine <ID>      po   — cria arquivo de refinamento para um item em draft
-  --status           dev  — exibe estado atual do backlog
+  --install           po   — instala o .bac no repositório
+  --comment <ID>      po   — adiciona um comentário/nota a um item
+  --status            dev  — exibe estado atual do backlog
 
 Exemplos:
   bac --install
-  bac --refine FEAT-001
+  bac --comment FEAT-001
   bac --status
   bac --agent qa --status
-  bac --repo /outro/repo --refine FEAT-001
+  bac --repo /outro/repo --comment FEAT-001
 EOF
 }
 
@@ -42,10 +42,10 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --repo)    [[ -n "${2:-}" ]] || die "--repo requer um valor";  REPO="$2";  shift 2 ;;
     --agent)   [[ -n "${2:-}" ]] || die "--agent requer um valor"; AGENT="$2"; shift 2 ;;
-    --install) ACTIONS+=(install);                                              shift ;;
-    --status)  ACTIONS+=(status);                                               shift ;;
-    --refine)  [[ -n "${2:-}" ]] || die "--refine requer um ID (ex: FEAT-001)"
-               ACTIONS+=("refine:$2");                                          shift 2 ;;
+    --install) ACTIONS+=(install);                                               shift ;;
+    --status)  ACTIONS+=(status);                                                shift ;;
+    --comment) [[ -n "${2:-}" ]] || die "--comment requer um ID (ex: FEAT-001)"
+               ACTIONS+=("comment:$2");                                          shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *)         die "opção desconhecida: $1" ;;
   esac
@@ -63,7 +63,7 @@ is_valid_agent() {
 default_agent_for() {
   case "$1" in
     install) echo "po"  ;;
-    refine)  echo "po"  ;;
+    comment) echo "po"  ;;
     status)  echo "dev" ;;
     *)       echo ""    ;;
   esac
@@ -223,9 +223,9 @@ EOF
   echo ".bac instalado em $REPO"
 }
 
-cmd_refine() {
+cmd_comment() {
   local id="$1"
-  [[ "$AGENT" == "po" ]] || die "agente '$AGENT' não tem permissão para: --refine"
+  [[ "$AGENT" == "po" ]] || die "agente '$AGENT' não tem permissão para: --comment"
   [[ -d "$REPO/.bac" ]] || die "repositório sem .bac — rode 'bac install' primeiro"
 
   local item
@@ -243,10 +243,10 @@ cmd_refine() {
   slug=$(basename "$item" .md)
 
   cat > "$out" <<EOF
-# Refinamento — ${id}: ${title}
+# Comentário — ${id}: ${title}
 
-> Este arquivo será lido pela IA no próximo ciclo de refinamento.
-> Escreva abaixo suas notas, considerações ou ajustes que quer que ela aplique na história.
+> Este arquivo será lido pela IA no próximo ciclo associado a este item.
+> Escreva abaixo suas notas, considerações ou ajustes.
 
 Item: [${slug}.md](./${slug}.md)
 
@@ -279,24 +279,24 @@ cmd_status() {
     n_ready=$(grep -rl "BAC:.*:READY" "$sprint_dir" 2>/dev/null | grep -v "SPRINT.md" | wc -l | tr -d ' ' || true)
   fi
 
-  local refine_ids=() seen=""
+  local comment_ids=() seen=""
   while IFS= read -r f; do
     refine_has_content "$f" || continue
     local id
     id="$(basename "$f" | grep -oP '^FEAT-[0-9]+')"
     [[ -n "$id" && "$seen" != *"|$id|"* ]] || continue
     seen="$seen|$id|"
-    refine_ids+=("$id")
+    comment_ids+=("$id")
   done < <(find "$REPO/.bac/draft" -maxdepth 1 \
     -name "*-[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]-[0-9][0-9][0-9][0-9].md" \
     2>/dev/null | sort)
-  local n_refine=${#refine_ids[@]}
+  local n_comments=${#comment_ids[@]}
 
   echo "draft:           $n_draft item(s)"
   echo "backlog:         $n_backlog item(s)"
   echo "$sprint_label:   $n_sprint item(s) | $n_ready ready"
-  if [[ $n_refine -gt 0 ]]; then
-    echo "refinamentos:    $n_refine pendente(s) — ${refine_ids[*]}"
+  if [[ $n_comments -gt 0 ]]; then
+    echo "comentários:     $n_comments pendente(s) — ${comment_ids[*]}"
   fi
   echo "---"
   echo "próxima feature: $("$SCRIPTS_DIR/bac-next-feat" --repo "$REPO")"
@@ -308,7 +308,7 @@ for action in "${ACTIONS[@]}"; do
   action_arg="${action#*:}"
   case "$action_type" in
     install) cmd_install ;;
-    refine)  cmd_refine "$action_arg" ;;
+    comment) cmd_comment "$action_arg" ;;
     status)  cmd_status ;;
   esac
 done
