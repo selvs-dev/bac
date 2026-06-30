@@ -269,12 +269,78 @@ EOF
 
 action_refine() {
   local id="$1"
+
   local item
-  item=$(find "$REPO/.bac/draft" -maxdepth 1 -name "${id}-*.md" 2>/dev/null | head -1)
+  item=$(find "$REPO/.bac/draft" -maxdepth 1 -name "${id}-*.md" \
+    ! -name "*-[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]-[0-9][0-9][0-9][0-9].md" \
+    2>/dev/null | head -1)
   [[ -n "$item" ]] || die "item '$id' não encontrado em draft/"
 
-  echo "refinando $id: $item"
-  cat "$item"
+  local refine_files=()
+  while IFS= read -r f; do
+    refine_files+=("$f")
+  done < <(find "$REPO/.bac/draft" -maxdepth 1 \
+    -name "${id}-[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]-[0-9][0-9][0-9][0-9].md" \
+    2>/dev/null | sort)
+
+  [[ ${#refine_files[@]} -gt 0 ]] || die "nenhum arquivo de refinamento encontrado para $id"
+
+  local n=${#refine_files[@]}
+  echo "refinando $id ($n nota(s) do usuário)..."
+
+  local refine_block=""
+  local i=1
+  for f in "${refine_files[@]}"; do
+    refine_block+="### Nota $i"$'\n'
+    refine_block+="$(cat "$f")"$'\n\n'
+    ((i++)) || true
+  done
+
+  local prompt
+  prompt="$(cat <<PROMPT
+Você é um Product Owner refinando uma história de usuário no sistema BAC (Backlog-as-Code).
+
+A história atual está abaixo:
+
+<historia>
+$(cat "$item")
+</historia>
+
+O usuário escreveu as seguintes notas de refinamento para esta história:
+
+<notas>
+${refine_block}
+</notas>
+
+Sua tarefa:
+- Incorpore as notas do usuário na história, atualizando as seções relevantes
+- Se o usuário indicou algo novo, adicione; se corrigiu algo, corrija
+- Se as notas forem genéricas ou vazias, mantenha a história como está
+- Mantenha o formato markdown e a estrutura existente (frontmatter YAML, badge de status, seções)
+- Retorne APENAS o conteúdo atualizado da história, sem explicações adicionais
+
+PROMPT
+)"
+
+  echo "chamando claude..."
+  local updated
+  updated="$(echo "$prompt" | claude --print --output-format text)" \
+    || die "falha ao chamar o claude"
+
+  # remove code fence se o modelo envolveu a resposta em ```markdown ... ```
+  updated="$(echo "$updated" | sed '/^```[a-z]*$/d; /^```$/d')"
+
+  echo "$updated" > "$item"
+
+  for f in "${refine_files[@]}"; do
+    rm "$f"
+  done
+
+  echo "história atualizada: $(basename "$item")"
+
+  git -C "$REPO" add .bac/draft/
+  git -C "$REPO" diff --cached --quiet \
+    || git -C "$REPO" commit -m "refine($id): incorpora notas de refinamento via IA"
 }
 
 action_status() {
