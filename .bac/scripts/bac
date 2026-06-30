@@ -249,9 +249,23 @@ cmd_status() {
     n_ready=$(grep -rl "BAC:.*:READY" "$sprint_dir" 2>/dev/null | grep -v "SPRINT.md" | wc -l | tr -d ' ' || true)
   fi
 
+  local refine_ids=()
+  while IFS= read -r id; do
+    refine_ids+=("$id")
+  done < <(find "$REPO/.bac/draft" -maxdepth 1 \
+    -name "*-[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]-[0-9][0-9][0-9][0-9].md" \
+    2>/dev/null \
+    | xargs -I{} basename {} \
+    | grep -oP '^FEAT-[0-9]+' \
+    | sort -u)
+  local n_refine=${#refine_ids[@]}
+
   echo "draft:           $n_draft item(s)"
   echo "backlog:         $n_backlog item(s)"
   echo "$sprint_label:   $n_sprint item(s) | $n_ready ready"
+  if [[ $n_refine -gt 0 ]]; then
+    echo "refinamentos:    $n_refine pendente(s) — ${refine_ids[*]}"
+  fi
   echo "---"
   echo "próxima feature: $("$SCRIPTS_DIR/bac-next-feat" --repo "$REPO")"
   echo "próxima sprint:  $("$SCRIPTS_DIR/bac-next-sprint" --repo "$REPO")"
