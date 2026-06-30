@@ -96,7 +96,7 @@ to_ssh_url() {
   local input="$1"
   if [[ "$input" =~ ^git@github\.com: ]]; then
     echo "$input"
-  elif [[ "$input" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]; then
+  elif [[ "$input" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*/[A-Za-z0-9][A-Za-z0-9_.-]*$ ]]; then
     echo "git@github.com:${input}.git"
   elif [[ "$input" =~ ^https://github\.com/(.+)$ ]]; then
     local path="${BASH_REMATCH[1]%.git}"
@@ -104,9 +104,17 @@ to_ssh_url() {
   fi
 }
 
-if [[ "$REPO" == "." ]]; then
-  REPO="$(pwd)"
-elif [[ ! -d "$REPO" ]]; then
+is_local_path() {
+  [[ "$1" == "."   ]] || \
+  [[ "$1" == "./"* ]] || \
+  [[ "$1" == "/"*  ]] || \
+  [[ -d "$1"       ]]
+}
+
+if is_local_path "$REPO"; then
+  [[ -d "$REPO" ]] || die "repositório não encontrado: $REPO"
+  REPO="$(cd "$REPO" && pwd)"
+else
   SSH_URL="$(to_ssh_url "$REPO")"
   [[ -n "$SSH_URL" ]] || die "valor inválido para --repo: $REPO"
   echo "clonando $SSH_URL..."
@@ -238,6 +246,28 @@ EOF
 }
 
 action_status() {
+  local bac="$REPO/.bac"
+
+  local n_draft n_backlog
+  n_draft=$(find "$bac/draft"   -maxdepth 1 -name "*.md" 2>/dev/null | wc -l | tr -d ' ')
+  n_backlog=$(find "$bac/backlog" -maxdepth 1 -name "*.md" 2>/dev/null | wc -l | tr -d ' ')
+
+  local open_sprint=""
+  open_sprint=$(grep -rl "status: OPEN" "$bac"/sprint-*/SPRINT.md 2>/dev/null | head -1 || true)
+
+  local sprint_label="—" n_sprint=0 n_ready=0
+  if [[ -n "$open_sprint" ]]; then
+    local sprint_dir
+    sprint_dir="$(dirname "$open_sprint")"
+    sprint_label="$(basename "$sprint_dir")"
+    n_sprint=$(find "$sprint_dir" -maxdepth 1 -name "*.md" ! -name "SPRINT.md" 2>/dev/null | wc -l | tr -d ' ')
+    n_ready=$(grep -rl "BAC:.*:READY" "$sprint_dir" 2>/dev/null | grep -v "SPRINT.md" | wc -l | tr -d ' ' || true)
+  fi
+
+  echo "draft:           $n_draft item(s)"
+  echo "backlog:         $n_backlog item(s)"
+  echo "$sprint_label:  $n_sprint item(s) | $n_ready ready"
+  echo "---"
   echo "próxima feature: $("$SCRIPTS_DIR/bac-next-feat" --repo "$REPO")"
   echo "próxima sprint:  $("$SCRIPTS_DIR/bac-next-sprint" --repo "$REPO")"
 }
