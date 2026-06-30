@@ -1,29 +1,29 @@
 #!/usr/bin/env bash
 # CLI manual do BAC — comandos executados pelo usuário dentro do repositório.
-# Uso: bac <subcomando> [opções] [argumentos]
+# Uso: bac [opções] --<comando> [argumento]
 set -euo pipefail
 
 SCRIPTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 usage() {
   cat <<EOF
-Uso: bac <subcomando> [opções] [argumentos]
-
-Subcomandos:
-  install            Instala o .bac no repositório atual
-  refine <ID>        Cria arquivo de sugestão de refinamento para um item em draft
-  status             Exibe estado atual do backlog
+Uso: bac --agent <agente> [--repo <path>] --<comando> [argumento]
 
 Opções:
   --repo <path>      Repositório alvo (padrão: diretório atual)
   --agent <agente>   Agente executor: po | dev | qa
   -h, --help         Exibe esta ajuda
 
+Comandos:
+  --install          Instala o .bac no repositório
+  --refine <ID>      Cria arquivo de sugestão de refinamento para um item em draft
+  --status           Exibe estado atual do backlog
+
 Exemplos:
-  bac install --agent po
-  bac refine FEAT-001 --agent po
-  bac status --agent dev
-  bac refine FEAT-001 --repo /outro/repo --agent po
+  bac --agent po --install
+  bac --agent po --refine FEAT-001
+  bac --agent dev --status
+  bac --agent po --repo /outro/repo --refine FEAT-001
 EOF
 }
 
@@ -31,31 +31,27 @@ die() { echo "erro: $*" >&2; echo "" >&2; usage >&2; exit 1; }
 
 [[ $# -gt 0 ]] || { usage; exit 0; }
 
-# --- parse completo em uma passagem (flags e subcomando em qualquer ordem) ---
+# --- parse ---
 
 REPO="."
 AGENT=""
-SUBCMD=""
-ARGS=()
+ACTIONS=()
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --repo)    [[ -n "${2:-}" ]] || die "--repo requer um valor";  REPO="$2";  shift 2 ;;
     --agent)   [[ -n "${2:-}" ]] || die "--agent requer um valor"; AGENT="$2"; shift 2 ;;
+    --install) ACTIONS+=(install);                                              shift ;;
+    --status)  ACTIONS+=(status);                                               shift ;;
+    --refine)  [[ -n "${2:-}" ]] || die "--refine requer um ID (ex: FEAT-001)"
+               ACTIONS+=("refine:$2");                                          shift 2 ;;
     -h|--help) usage; exit 0 ;;
-    -*)        die "opção desconhecida: $1" ;;
-    *)
-      if [[ -z "$SUBCMD" ]]; then
-        SUBCMD="$1"
-      else
-        ARGS+=("$1")
-      fi
-      shift ;;
+    *)         die "opção desconhecida: $1" ;;
   esac
 done
 
-[[ -n "$SUBCMD" ]] || die "subcomando obrigatório"
-[[ -n "$AGENT" ]]  || die "--agent é obrigatório"
+[[ ${#ACTIONS[@]} -gt 0 ]] || die "nenhum comando especificado"
+[[ -n "$AGENT" ]]           || die "--agent é obrigatório"
 
 VALID_AGENTS=(po dev qa)
 is_valid_agent() {
@@ -105,7 +101,7 @@ fi
 
 cmd_install() {
   [[ "$AGENT" == "po" || "$AGENT" == "dev" ]] \
-    || die "agente '$AGENT' não tem permissão para: install"
+    || die "agente '$AGENT' não tem permissão para: --install"
   [[ -d "$REPO/.bac" ]] && { echo ".bac já existe em $REPO"; return; }
 
   local bac_url bac_url_https
@@ -198,9 +194,8 @@ EOF
 }
 
 cmd_refine() {
-  [[ "$AGENT" == "po" ]] || die "agente '$AGENT' não tem permissão para: refine"
-  local id="${ARGS[0]:-}"
-  [[ -n "$id" ]] || die "refine requer um ID. Ex: bac refine FEAT-001"
+  local id="$1"
+  [[ "$AGENT" == "po" ]] || die "agente '$AGENT' não tem permissão para: --refine"
   [[ -d "$REPO/.bac" ]] || die "repositório sem .bac — rode 'bac install' primeiro"
 
   local item
@@ -280,9 +275,12 @@ cmd_status() {
   echo "próxima sprint:  $("$SCRIPTS_DIR/bac-next-sprint" --repo "$REPO")"
 }
 
-case "$SUBCMD" in
-  install) cmd_install ;;
-  refine)  cmd_refine  ;;
-  status)  cmd_status  ;;
-  *)       die "subcomando desconhecido: '$SUBCMD'" ;;
-esac
+for action in "${ACTIONS[@]}"; do
+  action_type="${action%%:*}"
+  action_arg="${action#*:}"
+  case "$action_type" in
+    install) cmd_install ;;
+    refine)  cmd_refine "$action_arg" ;;
+    status)  cmd_status ;;
+  esac
+done
