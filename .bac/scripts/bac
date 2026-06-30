@@ -7,23 +7,24 @@ SCRIPTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 usage() {
   cat <<EOF
-Uso: bac --agent <agente> [--repo <path>] --<comando> [argumento]
+Uso: bac [--agent <agente>] [--repo <path>] --<comando> [argumento]
 
 Opções:
   --repo <path>      Repositório alvo (padrão: diretório atual)
-  --agent <agente>   Agente executor: po | dev | qa
+  --agent <agente>   Agente executor: po | dev | qa (inferido pela ação se omitido)
   -h, --help         Exibe esta ajuda
 
-Comandos:
-  --install          Instala o .bac no repositório
-  --refine <ID>      Cria arquivo de sugestão de refinamento para um item em draft
-  --status           Exibe estado atual do backlog
+Comandos e agente padrão:
+  --install          po   — instala o .bac no repositório
+  --refine <ID>      po   — cria arquivo de refinamento para um item em draft
+  --status           dev  — exibe estado atual do backlog
 
 Exemplos:
-  bac --agent po --install
-  bac --agent po --refine FEAT-001
-  bac --agent dev --status
-  bac --agent po --repo /outro/repo --refine FEAT-001
+  bac --install
+  bac --refine FEAT-001
+  bac --status
+  bac --agent qa --status
+  bac --repo /outro/repo --refine FEAT-001
 EOF
 }
 
@@ -51,7 +52,6 @@ while [[ $# -gt 0 ]]; do
 done
 
 [[ ${#ACTIONS[@]} -gt 0 ]] || die "nenhum comando especificado"
-[[ -n "$AGENT" ]]           || die "--agent é obrigatório"
 
 VALID_AGENTS=(po dev qa)
 is_valid_agent() {
@@ -59,6 +59,29 @@ is_valid_agent() {
   for v in "${VALID_AGENTS[@]}"; do [[ "$a" == "$v" ]] && return 0; done
   return 1
 }
+
+default_agent_for() {
+  case "$1" in
+    install) echo "po"  ;;
+    refine)  echo "po"  ;;
+    status)  echo "dev" ;;
+    *)       echo ""    ;;
+  esac
+}
+
+if [[ -z "$AGENT" ]]; then
+  inferred=""
+  for _a in "${ACTIONS[@]}"; do
+    _def="$(default_agent_for "${_a%%:*}")"
+    if [[ -z "$inferred" ]]; then
+      inferred="$_def"
+    elif [[ "$inferred" != "$_def" ]]; then
+      die "--agent é obrigatório quando as ações têm agentes padrão diferentes (${ACTIONS[*]})"
+    fi
+  done
+  AGENT="${inferred:-dev}"
+fi
+
 is_valid_agent "$AGENT" || die "agente inválido: '$AGENT'. Use: ${VALID_AGENTS[*]}"
 
 # --- resolução do repositório ---

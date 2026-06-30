@@ -6,23 +6,23 @@ SCRIPTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 usage() {
   cat <<EOF
-Uso: bac-cycle --repo <path|.|url> --agent <agente> [ações...]
+Uso: bac-cycle --repo <path|.|url> [--agent <agente>] [ações...]
 
 Opções:
   --repo          Caminho local, '.' para o diretório atual, ou URL do GitHub
-  --agent         Agente executor: po | dev | qa
+  --agent         Agente executor: po | dev | qa (inferido pela ação se omitido)
   -h, --help      Exibe esta ajuda
 
-Ações por agente:
-  todos:          --install  --status
-  po:             --refine <ID>
-  dev:            (em breve: --run)
-  qa:             (em breve: --review)
+Ações e agente padrão:
+  --install       po   — instala o .bac no repositório
+  --status        dev  — exibe estado atual do backlog
+  --refine <ID>   po   — ciclo de refinamento via IA
 
 Exemplos:
-  bac-cycle --repo . --agent po --refine FEAT-001
-  bac-cycle --repo . --agent dev --status
-  bac-cycle --repo byselvs/workspace --agent dev --install --status
+  bac-cycle --repo . --refine FEAT-001
+  bac-cycle --repo . --status
+  bac-cycle --repo byselvs/workspace --install --status
+  bac-cycle --repo . --agent qa --status
 EOF
 }
 
@@ -61,7 +61,6 @@ done
 # --- validações ---
 
 [[ -n "$REPO" ]]           || die "--repo é obrigatório"
-[[ -n "$AGENT" ]]          || die "--agent é obrigatório"
 [[ ${#ACTIONS[@]} -gt 0 ]] || die "nenhuma ação especificada"
 
 is_valid_agent() {
@@ -71,6 +70,28 @@ is_valid_agent() {
   done
   return 1
 }
+
+default_agent_for() {
+  case "$1" in
+    install) echo "po"  ;;
+    refine)  echo "po"  ;;
+    status)  echo "dev" ;;
+    *)       echo ""    ;;
+  esac
+}
+
+if [[ -z "$AGENT" ]]; then
+  inferred=""
+  for _a in "${ACTIONS[@]}"; do
+    _def="$(default_agent_for "${_a%%:*}")"
+    if [[ -z "$inferred" ]]; then
+      inferred="$_def"
+    elif [[ "$inferred" != "$_def" ]]; then
+      die "--agent é obrigatório quando as ações têm agentes padrão diferentes (${ACTIONS[*]})"
+    fi
+  done
+  AGENT="${inferred:-dev}"
+fi
 
 is_valid_agent "$AGENT" || die "agente inválido: '$AGENT'. Use: ${VALID_AGENTS[*]}"
 
