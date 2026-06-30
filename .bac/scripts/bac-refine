@@ -1,26 +1,92 @@
 #!/usr/bin/env bash
 # Cria um arquivo de sugestão de refinamento para um item em draft/.
-# Uso: bac-refine <ID> [--repo <path>]
+# Uso: bac-refine --repo <path|.|url> --agent <agente> <ID>
 set -euo pipefail
 
+SCRIPTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+usage() {
+  cat <<EOF
+Uso: bac-refine --repo <path|.|url> --agent <agente> <ID>
+
+Opções:
+  --repo     Caminho local, '.' para o diretório atual, ou URL do GitHub
+  --agent    Agente executor: po | dev | qa
+  -h, --help Exibe esta ajuda
+
+Exemplos:
+  bac-refine --repo . --agent po FEAT-001
+  bac-refine --repo byselvs/meu-projeto --agent po FEAT-002
+EOF
+}
+
+die() { echo "erro: $*" >&2; echo "" >&2; usage >&2; exit 1; }
+
+# --- parse args ---
+
+REPO=""
+AGENT=""
 ID=""
-REPO="."
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --repo) [[ -n "${2:-}" ]] || { echo "erro: --repo requer um valor" >&2; exit 1; }
-            REPO="$2"; shift 2 ;;
-    -*)     echo "uso: bac-refine <ID> [--repo <path>]" >&2; exit 1 ;;
-    *)      ID="$1"; shift ;;
+    --repo)    [[ -n "${2:-}" ]] || die "--repo requer um valor";  REPO="$2";  shift 2 ;;
+    --agent)   [[ -n "${2:-}" ]] || die "--agent requer um valor"; AGENT="$2"; shift 2 ;;
+    -h|--help) usage; exit 0 ;;
+    -*)        die "argumento desconhecido: $1" ;;
+    *)         [[ -z "$ID" ]] || die "ID duplicado: $1"; ID="$1"; shift ;;
   esac
 done
 
-[[ -n "$ID" ]] || { echo "erro: ID obrigatório. Ex: bac-refine FEAT-001" >&2; exit 1; }
-[[ -d "$REPO" ]] && REPO="$(cd "$REPO" && pwd)"
-[[ -d "$REPO/.bac" ]] || { echo "erro: .bac não encontrado em $REPO" >&2; exit 1; }
+[[ -n "$REPO" ]]  || die "--repo é obrigatório"
+[[ -n "$AGENT" ]] || die "--agent é obrigatório"
+[[ -n "$ID" ]]    || die "ID obrigatório. Ex: FEAT-001"
+[[ "$AGENT" == "po" ]] || die "apenas o agente 'po' pode refinar itens"
+
+# --- setup do repositório ---
+
+CLONED_DIR=""
+cleanup() { if [[ -n "$CLONED_DIR" ]]; then rm -rf "$CLONED_DIR"; fi; }
+trap cleanup EXIT
+
+to_ssh_url() {
+  local input="$1"
+  if [[ "$input" =~ ^git@github\.com: ]]; then
+    echo "$input"
+  elif [[ "$input" =~ ^[A-Za-z0-9][A-Za-z0-9_.-]*/[A-Za-z0-9][A-Za-z0-9_.-]*$ ]]; then
+    echo "git@github.com:${input}.git"
+  elif [[ "$input" =~ ^https://github\.com/(.+)$ ]]; then
+    local path="${BASH_REMATCH[1]%.git}"
+    echo "git@github.com:${path}.git"
+  fi
+}
+
+is_local_path() {
+  [[ "$1" == "."   ]] || \
+  [[ "$1" == "./"* ]] || \
+  [[ "$1" == "/"*  ]] || \
+  [[ -d "$1"       ]]
+}
+
+if is_local_path "$REPO"; then
+  [[ -d "$REPO" ]] || die "repositório não encontrado: $REPO"
+  REPO="$(cd "$REPO" && pwd)"
+else
+  SSH_URL="$(to_ssh_url "$REPO")"
+  [[ -n "$SSH_URL" ]] || die "valor inválido para --repo: $REPO"
+  echo "clonando $SSH_URL..."
+  CLONED_DIR="$(mktemp -d)"
+  git clone --depth 1 "$SSH_URL" "$CLONED_DIR" || die "falha ao clonar: $SSH_URL"
+  REPO="$CLONED_DIR"
+fi
+
+[[ -d "$REPO/.git" ]] || die "não é um repositório git: $REPO"
+[[ -d "$REPO/.bac" ]] || die "repositório sem .bac — rode --install primeiro"
+
+# --- execução ---
 
 item=$(find "$REPO/.bac/draft" -maxdepth 1 -name "${ID}-*.md" 2>/dev/null | head -1)
-[[ -n "$item" ]] || { echo "erro: '$ID' não encontrado em draft/" >&2; exit 1; }
+[[ -n "$item" ]] || die "'$ID' não encontrado em draft/"
 
 out_dir="$REPO/.bac/refine"
 out="$out_dir/${ID}.md"
