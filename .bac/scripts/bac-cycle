@@ -563,9 +563,6 @@ action_status() {
   fi
 
   echo ""
-  echo "---"
-  echo "next feature: $("$SCRIPTS_DIR/bac-next-feat" --repo "$REPO")"
-  echo "next sprint:  $("$SCRIPTS_DIR/bac-next-sprint" --repo "$REPO")"
 }
 
 for action in "${ACTIONS[@]}"; do

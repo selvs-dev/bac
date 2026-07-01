@@ -347,9 +347,6 @@ cmd_status() {
   fi
 
   echo ""
-  echo "---"
-  echo "next feature: $("$SCRIPTS_DIR/bac-next-feat" --repo "$REPO")"
-  echo "next sprint:  $("$SCRIPTS_DIR/bac-next-sprint" --repo "$REPO")"
 }
 
 cmd_create() {
