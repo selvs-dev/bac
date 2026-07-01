@@ -36,12 +36,14 @@ die() { echo "erro: $*" >&2; echo "" >&2; usage >&2; exit 1; }
 
 REPO="."
 AGENT=""
+COMMENT_TEXT=""
 ACTIONS=()
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
     --repo)    [[ -n "${2:-}" ]] || die "--repo requer um valor";  REPO="$2";  shift 2 ;;
     --agent)   [[ -n "${2:-}" ]] || die "--agent requer um valor"; AGENT="$2"; shift 2 ;;
+    --text)    [[ -n "${2:-}" ]] || die "--text requer um valor";  COMMENT_TEXT="$2"; shift 2 ;;
     --install) ACTIONS+=(install);                                               shift ;;
     --status)  ACTIONS+=(status);                                                shift ;;
     --comment) [[ -n "${2:-}" ]] || die "--comment requer um ID (ex: FEAT-001)"
@@ -252,7 +254,7 @@ Item: [${slug}.md](./${slug}.md)
 
 ---
 
-
+${COMMENT_TEXT}
 EOF
 
   echo "criado: $out"
