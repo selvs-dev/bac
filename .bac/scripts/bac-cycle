@@ -220,7 +220,7 @@ action_install() {
 
   mkdir -p "$REPO/.bac/draft" "$REPO/.bac/backlog" "$REPO/.bac/sprint-001"
 
-  for f in BAC.md README.md CONFIG.yaml CONTEXT.md TEAM.md TEMPLATE-FEATURE.md TEMPLATE-BUG.md; do
+  for f in BAC.md CONFIG.yaml CONTEXT.md TEAM.md; do
     cp "$BAC_CLONE_DIR/.bac/$f" "$REPO/.bac/$f"
   done
 
@@ -235,63 +235,24 @@ action_install() {
 status: OPEN
 ---
 
-# Sprint 001 — Getting Started
-
-**Objetivo:** Configurar o projeto, definir contexto e criar as primeiras tarefas no BAC.
-
-## Retrospectiva
-
-_(preencher ao fechar a sprint — 3 frases: bom, ruim, ajustar.)_
-EOF
-
-  cat > "$REPO/.bac/draft/FEAT-001-getting-started.md" <<'EOF'
----
-priority: P1
----
-
-<!-- BAC:FEATURE:DRAFT id=FEAT-001 -->
-
-> 📝 **`DRAFT`** — spec em construção, ainda não pode ser implementado
-
-# Getting Started
-
-## Contexto
-
-Este é o primeiro item do BAC neste repositório. Use-o como referência de
-formato ou substitua pelo seu primeiro item real.
-
-## Proposta
-
-Configurar o projeto: definir stack, ambientes, branches e primeiros passos
-de desenvolvimento.
-
-## Escopo
-
-### Dentro do escopo
-- Preencher `.bac/CONTEXT.md` com stack e arquitetura do projeto
-- Preencher `.bac/TEAM.md` com pessoas e agentes envolvidos
-- Criar `AGENTS.md` e `CLAUDE.md` na raiz do repositório
-
-### Fora do escopo
-- Qualquer implementação de funcionalidade real
-
-## Critérios de aceite
-
-- [ ] `CONTEXT.md` descreve a stack e os ambientes do projeto
-- [ ] `TEAM.md` lista as pessoas e seus papéis
-- [ ] `AGENTS.md` existe na raiz com instruções para agentes de IA
-
-## Como testar
-
-Abrir uma sessão do Claude Code e pedir "leia o AGENTS.md" — o agente deve
-entender o projeto sem explicação adicional.
-
-## Notas / decisões
-
-Substitua este item pelo seu primeiro item real quando estiver pronto.
+# Sprint 001
 EOF
 
   echo ".bac instalado em $REPO"
+}
+
+mark_refined() {
+  local file="$1"
+  local ts; ts="$(date +%Y-%m-%dT%H:%M)"
+  if grep -q '^refined_at:' "$file"; then
+    sed -i "s|^refined_at:.*|refined_at: $ts|" "$file"
+  else
+    awk -v ts="$ts" '
+      NR==1 && /^---$/ { in_front=1; print; next }
+      in_front && /^---$/ { print "refined_at: " ts; in_front=0 }
+      { print }
+    ' "$file" > "${file}.tmp" && mv "${file}.tmp" "$file"
+  fi
 }
 
 action_refine() {
@@ -301,42 +262,98 @@ action_refine() {
   item=$(find "$REPO/.bac/draft" -maxdepth 1 -name "${id}-*.md" \
     ! -name "*-[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]-[0-9][0-9][0-9][0-9].md" \
     2>/dev/null | head -1)
-  [[ -n "$item" ]] || die "item '$id' não encontrado em draft/"
+  [[ -n "$item" ]] || die "item '$id' not found in draft/"
 
-  local refine_files=()
-  while IFS= read -r f; do
-    refine_files+=("$f")
-  done < <(find "$REPO/.bac/draft" -maxdepth 1 \
-    -name "${id}-[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]-[0-9][0-9][0-9][0-9].md" \
-    2>/dev/null | sort)
+  local note_files=()
+  while IFS= read -r f; do note_files+=("$f"); done < <(
+    find "$REPO/.bac/draft" -maxdepth 1 \
+      -name "${id}-[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]-[0-9][0-9][0-9][0-9].md" \
+      2>/dev/null | sort)
 
-  [[ ${#refine_files[@]} -gt 0 ]] || die "nenhum arquivo de refinamento encontrado para $id"
+  local blocker_files=()
+  while IFS= read -r f; do blocker_files+=("$f"); done < <(
+    find "$REPO/.bac/draft" -maxdepth 1 \
+      -name "${id}-blocker-[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]-[0-9][0-9][0-9][0-9].md" \
+      2>/dev/null | sort)
 
-  local n=${#refine_files[@]}
-  echo "refinando $id ($n nota(s) do usuário)..."
+  local n_notes=${#note_files[@]}
+  local n_blockers=${#blocker_files[@]}
+  echo "refining $id — $n_notes note(s), $n_blockers open blocker(s)..."
 
-  local item_rel refine_list=""
+  local item_rel
   item_rel="$(realpath --relative-to="$REPO" "$item")"
-  for f in "${refine_files[@]}"; do
-    refine_list+="- $(realpath --relative-to="$REPO" "$f")"$'\n'
+
+  local notes_list="" blockers_list=""
+  for f in "${note_files[@]}"; do
+    notes_list+="- $(realpath --relative-to="$REPO" "$f")"$'\n'
   done
+  for f in "${blocker_files[@]}"; do
+    blockers_list+="- $(realpath --relative-to="$REPO" "$f")"$'\n'
+  done
+
+  local notes_section blockers_section
+  if [[ $n_notes -gt 0 ]]; then
+    notes_section="USER NOTES TO INCORPORATE (read, incorporate into spec, then delete these files):
+${notes_list}"
+  else
+    notes_section="USER NOTES: none."
+  fi
+
+  if [[ $n_blockers -gt 0 ]]; then
+    blockers_section="OPEN BLOCKERS — questions from a previous refine cycle awaiting PO answers.
+Check if any user note resolves them. Delete resolved blocker files. Leave unresolved ones untouched.
+${blockers_list}"
+  else
+    blockers_section="OPEN BLOCKERS: none."
+  fi
+
+  local new_blocker_path=".bac/draft/${id}-blocker-$(date +%Y%m%d-%H%M).md"
 
   local prompt
   prompt="$(cat <<PROMPT
-Você é um Product Owner refinando uma história de usuário no sistema BAC (Backlog-as-Code).
+You are a Product Owner running a refinement cycle in the BAC (Backlog-as-Code) system.
 
-Tarefa:
-1. Leia a história: ${item_rel}
-2. Leia os comentários do usuário:
-${refine_list}
-3. Atualize a história incorporando os comentários (mantenha frontmatter YAML, badge de status e estrutura de seções)
-4. Apague os arquivos de comentários após processar
+== PROJECT CONTEXT ==
+Read these files first to understand the project stack, team, and decisions already made:
+- .bac/CONTEXT.md
+- .bac/TEAM.md
+- .bac/CONFIG.yaml (if it exists)
 
-Se os comentários forem vazios ou não tiverem conteúdo útil, mantenha a história como está e apague os arquivos assim mesmo.
+== ITEM TO REFINE ==
+${item_rel}
+
+== ${notes_section}
+
+== ${blockers_section}
+
+== YOUR TASKS (execute in order) ==
+
+1. Read the project context files and the item spec.
+
+2. If there are user notes: incorporate their content into the spec. Delete the note files after processing.
+
+3. If there are open blockers: check if any user note answers or resolves them. Delete the resolved blocker files. Leave unresolved ones untouched.
+
+4. Expand and complete the spec based on the project context. Think about what a developer needs to fully implement this item — fill in missing details, acceptance criteria, edge cases, technical constraints, and dependencies.
+
+5. Assess if there are still open questions that ONLY the PO can decide (things that cannot be inferred from the project context). Examples: which OAuth provider, business rules, scope decisions, naming, integrations.
+
+6. If there are unanswered questions:
+   Create a blocker file at: ${new_blocker_path}
+   Format:
+   # Blocker — ${id}: <item title>
+   > Generated by refine cycle. Answer each question via: bac --comment ${id} --text "..."
+
+   1. **<Topic>**: <Clear, specific question>
+   2. ...
+
+7. If the spec is complete and no decisions are missing, do NOT create a blocker file.
+
+Preserve the YAML frontmatter, status badge, and section structure. Do not add or modify refined_at in the frontmatter.
 PROMPT
 )"
 
-  echo "chamando claude..."
+  echo "calling claude..."
 
   (cd "$REPO" && echo "$prompt" | claude --print --verbose \
     --output-format stream-json \
@@ -403,56 +420,152 @@ for raw in sys.stdin:
             sys.stdout.write(f'  |  \${cost:.4f}')
         sys.stdout.write('\n')
         sys.stdout.flush()
-" || die "falha ao chamar o claude"
+" || die "claude call failed"
+
+  mark_refined "$item"
+
+  local n_remaining
+  n_remaining=$(find "$REPO/.bac/draft" -maxdepth 1 \
+    -name "${id}-blocker-[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]-[0-9][0-9][0-9][0-9].md" \
+    2>/dev/null | wc -l | tr -d ' ')
+
+  local commit_msg
+  if [[ $n_remaining -gt 0 ]]; then
+    commit_msg="refine($id): spec updated, ${n_remaining} blocker(s) open"
+  else
+    commit_msg="refine($id): spec complete, no open blockers"
+  fi
 
   git -C "$REPO" add .bac/draft/
   git -C "$REPO" diff --cached --quiet \
-    || git -C "$REPO" commit -m "refine($id): incorpora comentários via IA"
+    || git -C "$REPO" commit -m "$commit_msg"
+}
+
+item_title() {
+  grep -m1 '^# ' "$1" 2>/dev/null | sed 's/^# //'
+}
+
+item_note_count() {
+  local id="$1" dir="$2"
+  find "$dir" -maxdepth 1 \
+    -name "${id}-[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]-[0-9][0-9][0-9][0-9].md" \
+    2>/dev/null | wc -l | tr -d ' '
+}
+
+item_blocker_count() {
+  local id="$1" dir="$2"
+  find "$dir" -maxdepth 1 \
+    -name "${id}-blocker-[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]-[0-9][0-9][0-9][0-9].md" \
+    2>/dev/null | wc -l | tr -d ' '
 }
 
 action_status() {
   local bac="$REPO/.bac"
 
-  local n_draft n_backlog
-  n_draft=$(find "$bac/draft" -maxdepth 1 -name "*.md" \
-    ! -name "*-[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]-[0-9][0-9][0-9][0-9].md" \
-    2>/dev/null | wc -l | tr -d ' ')
-  n_backlog=$(find "$bac/backlog" -maxdepth 1 -name "*.md" 2>/dev/null | wc -l | tr -d ' ')
+  # --- Draft ---
+  local draft_files=()
+  while IFS= read -r f; do draft_files+=("$f"); done < <(
+    find "$bac/draft" -maxdepth 1 -name "*.md" \
+      ! -name "*-[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]-[0-9][0-9][0-9][0-9].md" \
+      2>/dev/null | sort)
+  local n_draft=${#draft_files[@]}
 
+  echo "draft ($n_draft):"
+  if [[ $n_draft -eq 0 ]]; then
+    echo "  —"
+  else
+    for f in "${draft_files[@]}"; do
+      local fid ftitle ftags fn
+      fid="$(basename "$f" | grep -oP '^[A-Z]+-[0-9]+')"
+      ftitle="$(item_title "$f")"
+      ftags=""
+      grep -q '^refined_at:' "$f" || ftags+=" [unrefined]"
+      local fb fn
+      fb="$(item_blocker_count "$fid" "$bac/draft")"
+      fn="$(item_note_count    "$fid" "$bac/draft")"
+      [[ "$fb" -gt 0 ]] && ftags+=" [${fb} blocker(s)]"
+      [[ "$fn" -gt 0 ]] && ftags+=" [${fn} note(s)]"
+      printf "  %-10s  %-45s%s\n" "$fid" "${ftitle:0:45}" "$ftags"
+    done
+  fi
+
+  echo ""
+
+  # --- Backlog ---
+  local backlog_files=()
+  while IFS= read -r f; do backlog_files+=("$f"); done < <(
+    find "$bac/backlog" -maxdepth 1 -name "*.md" 2>/dev/null | sort)
+  local n_backlog=${#backlog_files[@]}
+
+  echo "backlog ($n_backlog):"
+  if [[ $n_backlog -eq 0 ]]; then
+    echo "  —"
+  else
+    for f in "${backlog_files[@]}"; do
+      local fid ftitle
+      fid="$(basename "$f" | grep -oP '^[A-Z]+-[0-9]+')"
+      ftitle="$(item_title "$f")"
+      printf "  %-10s  %s\n" "$fid" "${ftitle:0:55}"
+    done
+  fi
+
+  echo ""
+
+  # --- Sprint ---
   local open_sprint=""
   open_sprint=$(grep -rl "status: OPEN" "$bac"/sprint-*/SPRINT.md 2>/dev/null | head -1 || true)
 
-  local sprint_label="—" n_sprint=0 n_ready=0
   if [[ -n "$open_sprint" ]]; then
-    local sprint_dir
+    local sprint_dir sprint_label
     sprint_dir="$(dirname "$open_sprint")"
     sprint_label="$(basename "$sprint_dir")"
-    n_sprint=$(find "$sprint_dir" -maxdepth 1 -name "*.md" ! -name "SPRINT.md" 2>/dev/null | wc -l | tr -d ' ')
-    n_ready=$(grep -rl "BAC:.*:READY" "$sprint_dir" 2>/dev/null | grep -v "SPRINT.md" | wc -l | tr -d ' ' || true)
+
+    local ready_files=() pending_files=()
+    while IFS= read -r f; do
+      [[ "$(basename "$f")" == "SPRINT.md" ]] && continue
+      if grep -q 'BAC:.*:READY' "$f" 2>/dev/null; then
+        ready_files+=("$f")
+      else
+        pending_files+=("$f")
+      fi
+    done < <(find "$sprint_dir" -maxdepth 1 -name "*.md" ! -name "SPRINT.md" 2>/dev/null | sort)
+
+    local n_ready=${#ready_files[@]} n_pending=${#pending_files[@]}
+    local n_sprint=$(( n_ready + n_pending ))
+
+    echo "$sprint_label ($n_sprint items | $n_ready ready):"
+
+    echo "  ready:"
+    if [[ $n_ready -eq 0 ]]; then
+      echo "    —"
+    else
+      for f in "${ready_files[@]}"; do
+        local fid ftitle
+        fid="$(basename "$f" | grep -oP '^[A-Z]+-[0-9]+')"
+        ftitle="$(item_title "$f")"
+        printf "    %-10s  %s\n" "$fid" "${ftitle:0:50}"
+      done
+    fi
+
+    echo "  pending:"
+    if [[ $n_pending -eq 0 ]]; then
+      echo "    —"
+    else
+      for f in "${pending_files[@]}"; do
+        local fid ftitle
+        fid="$(basename "$f" | grep -oP '^[A-Z]+-[0-9]+')"
+        ftitle="$(item_title "$f")"
+        printf "    %-10s  %s\n" "$fid" "${ftitle:0:50}"
+      done
+    fi
+  else
+    echo "sprint: — (no open sprint)"
   fi
 
-  local comment_ids=() seen=""
-  while IFS= read -r f; do
-    refine_has_content "$f" || continue
-    local id
-    id="$(basename "$f" | grep -oP '^FEAT-[0-9]+')"
-    [[ -n "$id" && "$seen" != *"|$id|"* ]] || continue
-    seen="$seen|$id|"
-    comment_ids+=("$id")
-  done < <(find "$bac/draft" -maxdepth 1 \
-    -name "*-[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]-[0-9][0-9][0-9][0-9].md" \
-    2>/dev/null | sort)
-  local n_comments=${#comment_ids[@]}
-
-  echo "draft:           $n_draft item(s)"
-  echo "backlog:         $n_backlog item(s)"
-  echo "$sprint_label:  $n_sprint item(s) | $n_ready ready"
-  if [[ $n_comments -gt 0 ]]; then
-    echo "comentários:     $n_comments pendente(s) — ${comment_ids[*]}"
-  fi
+  echo ""
   echo "---"
-  echo "próxima feature: $("$SCRIPTS_DIR/bac-next-feat" --repo "$REPO")"
-  echo "próxima sprint:  $("$SCRIPTS_DIR/bac-next-sprint" --repo "$REPO")"
+  echo "next feature: $("$SCRIPTS_DIR/bac-next-feat" --repo "$REPO")"
+  echo "next sprint:  $("$SCRIPTS_DIR/bac-next-sprint" --repo "$REPO")"
 }
 
 for action in "${ACTIONS[@]}"; do

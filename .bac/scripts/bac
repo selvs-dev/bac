@@ -20,14 +20,17 @@ Comandos e agente padrão:
   --comment <ID>           po   — adiciona um comentário/nota a um item
   --status                 dev  — exibe estado atual do backlog
 
-Opção extra:
+Opções extras:
   --text "..."   texto inicial para --create (título) ou --comment (nota)
+  --immediate    após --create ou --comment, executa imediatamente o refine via bac-cycle
 
 Exemplos:
   bac --create feature --text "Login com Google"
+  bac --create feature --text "Login com Google" --immediate
   bac --create bug --text "Botão não responde no mobile"
   bac --create task
   bac --comment FEAT-001 --text "considere dark mode"
+  bac --comment FEAT-001 --text "usar Google OAuth" --immediate
   bac --status
 EOF
 }
@@ -41,21 +44,28 @@ die() { echo "erro: $*" >&2; echo "" >&2; usage >&2; exit 1; }
 REPO="."
 AGENT=""
 COMMENT_TEXT=""
+IMMEDIATE=false
+LAST_ID=""
 ACTIONS=()
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --repo)    [[ -n "${2:-}" ]] || die "--repo requer um valor";  REPO="$2";  shift 2 ;;
-    --agent)   [[ -n "${2:-}" ]] || die "--agent requer um valor"; AGENT="$2"; shift 2 ;;
-    --text)    [[ -n "${2:-}" ]] || die "--text requer um valor";  COMMENT_TEXT="$2"; shift 2 ;;
-    --install) ACTIONS+=(install);                                               shift ;;
-    --status)  ACTIONS+=(status);                                                shift ;;
-    --create)  [[ -n "${2:-}" ]] || die "--create requer um tipo (feature | bug | task)"
-               ACTIONS+=("create:$2");                                           shift 2 ;;
-    --comment) [[ -n "${2:-}" ]] || die "--comment requer um ID (ex: FEAT-001)"
-               ACTIONS+=("comment:$2");                                          shift 2 ;;
-    -h|--help) usage; exit 0 ;;
-    *)         die "opção desconhecida: $1" ;;
+    --repo)      [[ -n "${2:-}" ]] || die "--repo requer um valor";  REPO="$2";  shift 2 ;;
+    --agent)     [[ -n "${2:-}" ]] || die "--agent requer um valor"; AGENT="$2"; shift 2 ;;
+    --text)      [[ -n "${2:-}" ]] || die "--text requer um valor";  COMMENT_TEXT="$2"; shift 2 ;;
+    --immediate) IMMEDIATE=true;                                                  shift ;;
+    --install)   ACTIONS+=(install);                                              shift ;;
+    --status)    if [[ -n "${2:-}" && "${2}" != --* ]]; then
+                   ACTIONS+=("status:$2"); shift 2
+                 else
+                   ACTIONS+=(status);     shift
+                 fi ;;
+    --create)    [[ -n "${2:-}" ]] || die "--create requer um tipo (feature | bug | task)"
+                 ACTIONS+=("create:$2");                                          shift 2 ;;
+    --comment)   [[ -n "${2:-}" ]] || die "--comment requer um ID (ex: FEAT-001)"
+                 ACTIONS+=("comment:$2");                                         shift 2 ;;
+    -h|--help)   usage; exit 0 ;;
+    *)           die "opção desconhecida: $1" ;;
   esac
 done
 
@@ -157,7 +167,7 @@ cmd_install() {
   echo "instalando .bac em $REPO..."
   mkdir -p "$REPO/.bac/draft" "$REPO/.bac/backlog" "$REPO/.bac/sprint-001"
 
-  for f in BAC.md README.md CONFIG.yaml CONTEXT.md TEAM.md TEMPLATE-FEATURE.md TEMPLATE-BUG.md; do
+  for f in BAC.md CONFIG.yaml CONTEXT.md TEAM.md; do
     cp "$bac_clone/.bac/$f" "$REPO/.bac/$f"
   done
 
@@ -172,60 +182,7 @@ cmd_install() {
 status: OPEN
 ---
 
-# Sprint 001 — Getting Started
-
-**Objetivo:** Configurar o projeto, definir contexto e criar as primeiras tarefas no BAC.
-
-## Retrospectiva
-
-_(preencher ao fechar a sprint — 3 frases: bom, ruim, ajustar.)_
-EOF
-
-  cat > "$REPO/.bac/draft/FEAT-001-getting-started.md" <<'EOF'
----
-priority: P1
----
-
-<!-- BAC:FEATURE:DRAFT id=FEAT-001 -->
-
-> 📝 **`DRAFT`** — spec em construção, ainda não pode ser implementado
-
-# Getting Started
-
-## Contexto
-
-Este é o primeiro item do BAC neste repositório. Use-o como referência de
-formato ou substitua pelo seu primeiro item real.
-
-## Proposta
-
-Configurar o projeto: definir stack, ambientes, branches e primeiros passos
-de desenvolvimento.
-
-## Escopo
-
-### Dentro do escopo
-- Preencher `.bac/CONTEXT.md` com stack e arquitetura do projeto
-- Preencher `.bac/TEAM.md` com pessoas e agentes envolvidos
-- Criar `AGENTS.md` e `CLAUDE.md` na raiz do repositório
-
-### Fora do escopo
-- Qualquer implementação de funcionalidade real
-
-## Critérios de aceite
-
-- [ ] `CONTEXT.md` descreve a stack e os ambientes do projeto
-- [ ] `TEAM.md` lista as pessoas e seus papéis
-- [ ] `AGENTS.md` existe na raiz com instruções para agentes de IA
-
-## Como testar
-
-Abrir uma sessão do Claude Code e pedir "leia o AGENTS.md" — o agente deve
-entender o projeto sem explicação adicional.
-
-## Notas / decisões
-
-Substitua este item pelo seu primeiro item real quando estiver pronto.
+# Sprint 001
 EOF
 
   rm -rf "$bac_clone"
@@ -234,6 +191,7 @@ EOF
 
 cmd_comment() {
   local id="$1"
+  LAST_ID="$id"
   [[ "$AGENT" == "po" ]] || die "agente '$AGENT' não tem permissão para: --comment"
   [[ -d "$REPO/.bac" ]] || die "repositório sem .bac — rode 'bac install' primeiro"
 
@@ -267,49 +225,131 @@ EOF
   echo "criado: $out"
 }
 
+item_title() {
+  grep -m1 '^# ' "$1" 2>/dev/null | sed 's/^# //'
+}
+
+item_note_count() {
+  local id="$1" dir="$2"
+  find "$dir" -maxdepth 1 \
+    -name "${id}-[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]-[0-9][0-9][0-9][0-9].md" \
+    2>/dev/null | wc -l | tr -d ' '
+}
+
+item_blocker_count() {
+  local id="$1" dir="$2"
+  find "$dir" -maxdepth 1 \
+    -name "${id}-blocker-[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]-[0-9][0-9][0-9][0-9].md" \
+    2>/dev/null | wc -l | tr -d ' '
+}
+
 cmd_status() {
   [[ -d "$REPO/.bac" ]] || die "repositório sem .bac — rode 'bac install' primeiro"
 
-  local n_draft n_backlog
-  n_draft=$(find "$REPO/.bac/draft" -maxdepth 1 -name "*.md" \
-    ! -name "*-[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]-[0-9][0-9][0-9][0-9].md" \
-    2>/dev/null | wc -l | tr -d ' ')
-  n_backlog=$(find "$REPO/.bac/backlog" -maxdepth 1 -name "*.md" 2>/dev/null | wc -l | tr -d ' ')
+  # --- Draft ---
+  local draft_files=()
+  while IFS= read -r f; do draft_files+=("$f"); done < <(
+    find "$REPO/.bac/draft" -maxdepth 1 -name "*.md" \
+      ! -name "*-[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]-[0-9][0-9][0-9][0-9].md" \
+      2>/dev/null | sort)
+  local n_draft=${#draft_files[@]}
 
+  echo "draft ($n_draft):"
+  if [[ $n_draft -eq 0 ]]; then
+    echo "  —"
+  else
+    for f in "${draft_files[@]}"; do
+      local fid ftitle ftags fn
+      fid="$(basename "$f" | grep -oP '^[A-Z]+-[0-9]+')"
+      ftitle="$(item_title "$f")"
+      ftags=""
+      grep -q '^refined_at:' "$f" || ftags+=" [unrefined]"
+      local fb fn
+      fb="$(item_blocker_count "$fid" "$REPO/.bac/draft")"
+      fn="$(item_note_count    "$fid" "$REPO/.bac/draft")"
+      [[ "$fb" -gt 0 ]] && ftags+=" [${fb} blocker(s)]"
+      [[ "$fn" -gt 0 ]] && ftags+=" [${fn} note(s)]"
+      printf "  %-10s  %-45s%s\n" "$fid" "${ftitle:0:45}" "$ftags"
+    done
+  fi
+
+  echo ""
+
+  # --- Backlog ---
+  local backlog_files=()
+  while IFS= read -r f; do backlog_files+=("$f"); done < <(
+    find "$REPO/.bac/backlog" -maxdepth 1 -name "*.md" 2>/dev/null | sort)
+  local n_backlog=${#backlog_files[@]}
+
+  echo "backlog ($n_backlog):"
+  if [[ $n_backlog -eq 0 ]]; then
+    echo "  —"
+  else
+    for f in "${backlog_files[@]}"; do
+      local fid ftitle
+      fid="$(basename "$f" | grep -oP '^[A-Z]+-[0-9]+')"
+      ftitle="$(item_title "$f")"
+      printf "  %-10s  %s\n" "$fid" "${ftitle:0:55}"
+    done
+  fi
+
+  echo ""
+
+  # --- Sprint ---
   local open_sprint=""
   open_sprint=$(grep -rl "status: OPEN" "$REPO/.bac"/sprint-*/SPRINT.md 2>/dev/null | head -1 || true)
 
-  local sprint_label="—" n_sprint=0 n_ready=0
   if [[ -n "$open_sprint" ]]; then
-    local sprint_dir
+    local sprint_dir sprint_label
     sprint_dir="$(dirname "$open_sprint")"
     sprint_label="$(basename "$sprint_dir")"
-    n_sprint=$(find "$sprint_dir" -maxdepth 1 -name "*.md" ! -name "SPRINT.md" 2>/dev/null | wc -l | tr -d ' ')
-    n_ready=$(grep -rl "BAC:.*:READY" "$sprint_dir" 2>/dev/null | grep -v "SPRINT.md" | wc -l | tr -d ' ' || true)
+
+    local ready_files=() pending_files=()
+    while IFS= read -r f; do
+      [[ "$(basename "$f")" == "SPRINT.md" ]] && continue
+      if grep -q 'BAC:.*:READY' "$f" 2>/dev/null; then
+        ready_files+=("$f")
+      else
+        pending_files+=("$f")
+      fi
+    done < <(find "$sprint_dir" -maxdepth 1 -name "*.md" ! -name "SPRINT.md" 2>/dev/null | sort)
+
+    local n_ready=${#ready_files[@]} n_pending=${#pending_files[@]}
+    local n_sprint=$(( n_ready + n_pending ))
+
+    echo "$sprint_label ($n_sprint items | $n_ready ready):"
+
+    echo "  ready:"
+    if [[ $n_ready -eq 0 ]]; then
+      echo "    —"
+    else
+      for f in "${ready_files[@]}"; do
+        local fid ftitle
+        fid="$(basename "$f" | grep -oP '^[A-Z]+-[0-9]+')"
+        ftitle="$(item_title "$f")"
+        printf "    %-10s  %s\n" "$fid" "${ftitle:0:50}"
+      done
+    fi
+
+    echo "  pending:"
+    if [[ $n_pending -eq 0 ]]; then
+      echo "    —"
+    else
+      for f in "${pending_files[@]}"; do
+        local fid ftitle
+        fid="$(basename "$f" | grep -oP '^[A-Z]+-[0-9]+')"
+        ftitle="$(item_title "$f")"
+        printf "    %-10s  %s\n" "$fid" "${ftitle:0:50}"
+      done
+    fi
+  else
+    echo "sprint: — (no open sprint)"
   fi
 
-  local comment_ids=() seen=""
-  while IFS= read -r f; do
-    refine_has_content "$f" || continue
-    local id
-    id="$(basename "$f" | grep -oP '^FEAT-[0-9]+')"
-    [[ -n "$id" && "$seen" != *"|$id|"* ]] || continue
-    seen="$seen|$id|"
-    comment_ids+=("$id")
-  done < <(find "$REPO/.bac/draft" -maxdepth 1 \
-    -name "*-[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]-[0-9][0-9][0-9][0-9].md" \
-    2>/dev/null | sort)
-  local n_comments=${#comment_ids[@]}
-
-  echo "draft:           $n_draft item(s)"
-  echo "backlog:         $n_backlog item(s)"
-  echo "$sprint_label:   $n_sprint item(s) | $n_ready ready"
-  if [[ $n_comments -gt 0 ]]; then
-    echo "comentários:     $n_comments pendente(s) — ${comment_ids[*]}"
-  fi
+  echo ""
   echo "---"
-  echo "próxima feature: $("$SCRIPTS_DIR/bac-next-feat" --repo "$REPO")"
-  echo "próxima sprint:  $("$SCRIPTS_DIR/bac-next-sprint" --repo "$REPO")"
+  echo "next feature: $("$SCRIPTS_DIR/bac-next-feat" --repo "$REPO")"
+  echo "next sprint:  $("$SCRIPTS_DIR/bac-next-sprint" --repo "$REPO")"
 }
 
 cmd_create() {
@@ -355,49 +395,104 @@ type: ${item_type}
 
 <!-- BAC:${badge}:DRAFT id=${id} -->
 
-> 📝 \`DRAFT\` — spec em construção, ainda não pode ser implementado
-
 # ${title}
 
-## Contexto
-
-_(descrever o contexto e motivação deste item)_
-
-## Proposta
-
-_(descrever o que deve ser feito)_
-
-## Escopo
-
-### Dentro do escopo
--
-
-### Fora do escopo
--
-
-## Critérios de aceite
-
-- [ ]
-
-## Como validar
-
-_(passos para testar e validar)_
-
-## Notas / decisões
-
-_(decisões técnicas e observações relevantes)_
+_(describe what and why — run \`bac-cycle --refine ${id}\` to expand this spec)_
 EOF
 
+  LAST_ID="$id"
   echo "criado: $out"
+}
+
+cmd_status_item() {
+  local id="$1"
+  [[ -d "$REPO/.bac" ]] || die "repositório sem .bac — rode 'bac --install' primeiro"
+
+  # find item across all locations
+  local item location=""
+  item=$(find "$REPO/.bac/draft" -maxdepth 1 -name "${id}-*.md" \
+    ! -name "*-[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]-[0-9][0-9][0-9][0-9].md" \
+    2>/dev/null | head -1)
+  [[ -n "$item" ]] && location="draft"
+
+  if [[ -z "$location" ]]; then
+    item=$(find "$REPO/.bac/backlog" -maxdepth 1 -name "${id}-*.md" 2>/dev/null | head -1)
+    [[ -n "$item" ]] && location="backlog"
+  fi
+
+  if [[ -z "$location" ]]; then
+    item=$(find "$REPO/.bac"/sprint-* -maxdepth 1 -name "${id}-*.md" \
+      ! -name "SPRINT.md" 2>/dev/null | head -1)
+    [[ -n "$item" ]] && location="$(basename "$(dirname "$item")")"
+  fi
+
+  [[ -n "$item" ]] || die "item '$id' not found"
+
+  local title
+  title="$(item_title "$item")"
+  echo "${id}  ${title}"
+  echo "  location:  ${location}"
+
+  # refined_at
+  local refined_at
+  refined_at="$(grep '^refined_at:' "$item" 2>/dev/null | sed 's/refined_at: //' || true)"
+  if [[ -n "$refined_at" ]]; then
+    echo "  refined:   yes (${refined_at})"
+  else
+    echo "  refined:   no"
+  fi
+
+  # blockers — only exist in draft
+  if [[ "$location" == "draft" ]]; then
+    local blocker_files=()
+    while IFS= read -r f; do blocker_files+=("$f"); done < <(
+      find "$REPO/.bac/draft" -maxdepth 1 \
+        -name "${id}-blocker-[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]-[0-9][0-9][0-9][0-9].md" \
+        2>/dev/null | sort)
+    local n_blockers=${#blocker_files[@]}
+    if [[ $n_blockers -gt 0 ]]; then
+      echo "  blockers:  ${n_blockers} open"
+      for f in "${blocker_files[@]}"; do echo "    → $(basename "$f")"; done
+    else
+      echo "  blockers:  none"
+    fi
+
+    local note_files=()
+    while IFS= read -r f; do note_files+=("$f"); done < <(
+      find "$REPO/.bac/draft" -maxdepth 1 \
+        -name "${id}-[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]-[0-9][0-9][0-9][0-9].md" \
+        2>/dev/null | sort)
+    local n_notes=${#note_files[@]}
+    if [[ $n_notes -gt 0 ]]; then
+      echo "  notes:     ${n_notes} pending"
+      for f in "${note_files[@]}"; do echo "    → $(basename "$f")"; done
+    else
+      echo "  notes:     none"
+    fi
+  fi
+
+  # sprint-specific: ready or pending
+  if [[ "$location" == sprint-* ]]; then
+    if grep -q 'BAC:.*:READY' "$item" 2>/dev/null; then
+      echo "  status:    ready"
+    else
+      echo "  status:    pending"
+    fi
+  fi
 }
 
 for action in "${ACTIONS[@]}"; do
   action_type="${action%%:*}"
   action_arg="${action#*:}"
+  LAST_ID=""
   case "$action_type" in
     install) cmd_install ;;
     create)  cmd_create "$action_arg" ;;
     comment) cmd_comment "$action_arg" ;;
-    status)  cmd_status ;;
+    status)  [[ "$action" == *:* ]] && cmd_status_item "$action_arg" || cmd_status ;;
   esac
+  if [[ "$IMMEDIATE" == true && -n "$LAST_ID" ]]; then
+    echo ""
+    bac-cycle --repo "$REPO" --refine "$LAST_ID"
+  fi
 done
