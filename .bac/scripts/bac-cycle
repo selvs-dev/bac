@@ -344,20 +344,47 @@ Sua tarefa:
 - Se o usuário indicou algo novo, adicione; se corrigiu algo, corrija
 - Se as notas forem genéricas ou vazias, mantenha a história como está
 - Mantenha o formato markdown e a estrutura existente (frontmatter YAML, badge de status, seções)
-- Retorne APENAS o conteúdo atualizado da história, sem explicações adicionais
+
+IMPORTANTE: Esta é uma chamada programática. Sua resposta deve conter EXCLUSIVAMENTE o
+conteúdo atualizado do arquivo markdown — sem explicações, sem comentários, sem blocos de
+código, sem cabeçalhos adicionais. O texto deve começar diretamente com --- ou com #.
 
 PROMPT
 )"
 
   echo "chamando claude..."
-  local tmpout
-  tmpout="$(mktemp)"
-  echo "$prompt" | claude --print --output-format text | tee "$tmpout" \
-    || { rm -f "$tmpout"; die "falha ao chamar o claude"; }
+  local tmpjson prev_len=0
+  tmpjson="$(mktemp)"
+
+  while IFS= read -r line; do
+    printf '%s\n' "$line" >> "$tmpjson"
+    local msg_type
+    msg_type="$(printf '%s' "$line" | jq -r '.type // ""' 2>/dev/null)" || continue
+    if [[ "$msg_type" == "assistant" ]]; then
+      printf '%s' "$line" \
+        | jq -r '(.message.content // [])[] | select(.type == "tool_use") | "  ↳ " + .name' \
+        2>/dev/null || true
+      local cur_text
+      cur_text="$(printf '%s' "$line" \
+        | jq -r '[(.message.content // [])[] | select(.type == "text") | .text] | join("")' \
+        2>/dev/null)" || continue
+      if [[ ${#cur_text} -gt $prev_len ]]; then
+        printf '%s' "${cur_text:$prev_len}"
+        prev_len=${#cur_text}
+      fi
+    fi
+  done < <(echo "$prompt" | claude --print --verbose \
+    --output-format stream-json \
+    --include-partial-messages \
+    --disallowedTools "Write,Edit,Bash,TodoWrite")
+  echo ""
 
   local updated
-  updated="$(sed '/^```[a-z]*$/d; /^```$/d' "$tmpout")"
-  rm -f "$tmpout"
+  updated="$(jq -r 'select(.type == "result") | .result' "$tmpjson" 2>/dev/null)"
+  rm -f "$tmpjson"
+  [[ -n "$updated" ]] || die "claude não retornou conteúdo"
+
+  updated="$(printf '%s' "$updated" | sed '/^```[a-z]*$/d; /^```$/d')"
 
   echo "$updated" > "$item"
 
