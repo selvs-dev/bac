@@ -353,35 +353,47 @@ PROMPT
 )"
 
   echo "chamando claude..."
-  local tmpjson prev_len=0
-  tmpjson="$(mktemp)"
+  local tmpresult
+  tmpresult="$(mktemp)"
 
-  while IFS= read -r line; do
-    printf '%s\n' "$line" >> "$tmpjson"
-    local msg_type
-    msg_type="$(printf '%s' "$line" | jq -r '.type // ""' 2>/dev/null)" || continue
-    if [[ "$msg_type" == "assistant" ]]; then
-      printf '%s' "$line" \
-        | jq -r '(.message.content // [])[] | select(.type == "tool_use") | "  ↳ " + .name' \
-        2>/dev/null || true
-      local cur_text
-      cur_text="$(printf '%s' "$line" \
-        | jq -r '[(.message.content // [])[] | select(.type == "text") | .text] | join("")' \
-        2>/dev/null)" || continue
-      if [[ ${#cur_text} -gt $prev_len ]]; then
-        printf '%s' "${cur_text:$prev_len}"
-        prev_len=${#cur_text}
-      fi
-    fi
-  done < <(echo "$prompt" | claude --print --verbose \
+  echo "$prompt" | claude --print --verbose \
     --output-format stream-json \
     --include-partial-messages \
-    --disallowedTools "Write,Edit,Bash,TodoWrite")
-  echo ""
+    --disallowedTools "Write,Edit,Bash,TodoWrite" \
+  | python3 -c "
+import sys, json
+prev_len = 0
+out = open(sys.argv[1], 'w')
+for raw in sys.stdin:
+    raw = raw.strip()
+    if not raw:
+        continue
+    try:
+        ev = json.loads(raw)
+    except Exception:
+        continue
+    t = ev.get('type', '')
+    if t == 'assistant':
+        content = ev.get('message', {}).get('content', [])
+        for b in content:
+            if b.get('type') == 'tool_use':
+                sys.stdout.write('\n  ↳ ' + b['name'] + '\n')
+                sys.stdout.flush()
+        all_text = ''.join(b.get('text', '') for b in content if b.get('type') == 'text')
+        if len(all_text) > prev_len:
+            sys.stdout.write(all_text[prev_len:])
+            sys.stdout.flush()
+            prev_len = len(all_text)
+    elif t == 'result':
+        out.write(ev.get('result', ''))
+out.close()
+sys.stdout.write('\n')
+sys.stdout.flush()
+" "$tmpresult" || { rm -f "$tmpresult"; die "falha ao chamar o claude"; }
 
   local updated
-  updated="$(jq -r 'select(.type == "result") | .result' "$tmpjson" 2>/dev/null)"
-  rm -f "$tmpjson"
+  updated="$(cat "$tmpresult")"
+  rm -f "$tmpresult"
   [[ -n "$updated" ]] || die "claude não retornou conteúdo"
 
   updated="$(printf '%s' "$updated" | sed '/^```[a-z]*$/d; /^```$/d')"
