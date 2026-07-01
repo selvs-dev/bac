@@ -15,16 +15,20 @@ Opções:
   -h, --help         Exibe esta ajuda
 
 Comandos e agente padrão:
-  --install           po   — instala o .bac no repositório
-  --comment <ID>      po   — adiciona um comentário/nota a um item
-  --status            dev  — exibe estado atual do backlog
+  --install                po   — instala o .bac no repositório
+  --create feature|bug|task  po   — cria um novo item em draft/
+  --comment <ID>           po   — adiciona um comentário/nota a um item
+  --status                 dev  — exibe estado atual do backlog
+
+Opção extra:
+  --text "..."   texto inicial para --create (título) ou --comment (nota)
 
 Exemplos:
-  bac --install
-  bac --comment FEAT-001
+  bac --create feature --text "Login com Google"
+  bac --create bug --text "Botão não responde no mobile"
+  bac --create task
+  bac --comment FEAT-001 --text "considere dark mode"
   bac --status
-  bac --agent qa --status
-  bac --repo /outro/repo --comment FEAT-001
 EOF
 }
 
@@ -46,6 +50,8 @@ while [[ $# -gt 0 ]]; do
     --text)    [[ -n "${2:-}" ]] || die "--text requer um valor";  COMMENT_TEXT="$2"; shift 2 ;;
     --install) ACTIONS+=(install);                                               shift ;;
     --status)  ACTIONS+=(status);                                                shift ;;
+    --create)  [[ -n "${2:-}" ]] || die "--create requer um tipo (feature | bug | task)"
+               ACTIONS+=("create:$2");                                           shift 2 ;;
     --comment) [[ -n "${2:-}" ]] || die "--comment requer um ID (ex: FEAT-001)"
                ACTIONS+=("comment:$2");                                          shift 2 ;;
     -h|--help) usage; exit 0 ;;
@@ -65,6 +71,7 @@ is_valid_agent() {
 default_agent_for() {
   case "$1" in
     install) echo "po"  ;;
+    create)  echo "po"  ;;
     comment) echo "po"  ;;
     status)  echo "dev" ;;
     *)       echo ""    ;;
@@ -305,11 +312,91 @@ cmd_status() {
   echo "próxima sprint:  $("$SCRIPTS_DIR/bac-next-sprint" --repo "$REPO")"
 }
 
+cmd_create() {
+  local item_type="$1"
+  [[ "$AGENT" == "po" ]] || die "agente '$AGENT' não tem permissão para: --create"
+  [[ -d "$REPO/.bac" ]] || die "repositório sem .bac — rode 'bac --install' primeiro"
+
+  local prefix badge
+  case "$item_type" in
+    feature) prefix="FEAT"; badge="FEATURE" ;;
+    bug)     prefix="BUG";  badge="BUG"     ;;
+    task)    prefix="TASK"; badge="TASK"     ;;
+    *) die "tipo inválido: '$item_type'. Use: feature | bug | task" ;;
+  esac
+
+  local last next
+  last=$(find "$REPO/.bac" -name "${prefix}-[0-9]*.md" 2>/dev/null \
+    | grep -oP "${prefix}-\K[0-9]+" | sort -n | tail -1 || true)
+  next=$(( 10#${last:-0} + 1 ))
+  local id
+  id="$(printf '%s-%03d' "$prefix" "$next")"
+
+  local title slug
+  if [[ -n "$COMMENT_TEXT" ]]; then
+    title="$COMMENT_TEXT"
+    slug="$(printf '%s' "$COMMENT_TEXT" \
+      | iconv -f utf-8 -t ascii//TRANSLIT 2>/dev/null \
+      | tr '[:upper:]' '[:lower:]' \
+      | sed 's/[^a-z0-9]/-/g; s/-\+/-/g; s/^-//; s/-$//' \
+      | cut -c1-50)"
+  else
+    title="$id"
+    slug="new-${item_type}"
+  fi
+
+  local out="$REPO/.bac/draft/${id}-${slug}.md"
+
+  cat > "$out" <<EOF
+---
+priority: P2
+type: ${item_type}
+---
+
+<!-- BAC:${badge}:DRAFT id=${id} -->
+
+> 📝 \`DRAFT\` — spec em construção, ainda não pode ser implementado
+
+# ${title}
+
+## Contexto
+
+_(descrever o contexto e motivação deste item)_
+
+## Proposta
+
+_(descrever o que deve ser feito)_
+
+## Escopo
+
+### Dentro do escopo
+-
+
+### Fora do escopo
+-
+
+## Critérios de aceite
+
+- [ ]
+
+## Como validar
+
+_(passos para testar e validar)_
+
+## Notas / decisões
+
+_(decisões técnicas e observações relevantes)_
+EOF
+
+  echo "criado: $out"
+}
+
 for action in "${ACTIONS[@]}"; do
   action_type="${action%%:*}"
   action_arg="${action#*:}"
   case "$action_type" in
     install) cmd_install ;;
+    create)  cmd_create "$action_arg" ;;
     comment) cmd_comment "$action_arg" ;;
     status)  cmd_status ;;
   esac
