@@ -350,12 +350,14 @@ PROMPT
 )"
 
   echo "chamando claude..."
-  local updated
-  updated="$(echo "$prompt" | claude --print --output-format text)" \
-    || die "falha ao chamar o claude"
+  local tmpout
+  tmpout="$(mktemp)"
+  echo "$prompt" | claude --print --output-format text | tee "$tmpout" \
+    || { rm -f "$tmpout"; die "falha ao chamar o claude"; }
 
-  # remove code fence se o modelo envolveu a resposta em ```markdown ... ```
-  updated="$(echo "$updated" | sed '/^```[a-z]*$/d; /^```$/d')"
+  local updated
+  updated="$(sed '/^```[a-z]*$/d; /^```$/d' "$tmpout")"
+  rm -f "$tmpout"
 
   echo "$updated" > "$item"
 
