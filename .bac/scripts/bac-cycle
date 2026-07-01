@@ -344,7 +344,18 @@ PROMPT
     --allowedTools "Read,Write,Edit,Bash,Glob,Grep,LS") \
   | python3 -c "
 import sys, json
-prev_len = 0
+
+prev_len   = 0
+seen_tools = set()
+last_in    = 0
+last_out   = 0
+
+def tool_detail(name, inp):
+    if 'file_path' in inp: return inp['file_path']
+    if 'command'   in inp: c = inp['command']; return (c[:60] + '…') if len(c) > 60 else c
+    if 'path'      in inp: return inp['path']
+    return ''
+
 for raw in sys.stdin:
     raw = raw.strip()
     if not raw:
@@ -353,20 +364,45 @@ for raw in sys.stdin:
         ev = json.loads(raw)
     except Exception:
         continue
+
     t = ev.get('type', '')
+
     if t == 'assistant':
-        content = ev.get('message', {}).get('content', [])
+        msg     = ev.get('message', {})
+        usage   = msg.get('usage', {})
+        in_tok  = usage.get('input_tokens',  0)
+        out_tok = usage.get('output_tokens', 0)
+        if in_tok  > last_in:  last_in  = in_tok
+        if out_tok > last_out: last_out = out_tok
+        in_tok  = last_in
+        out_tok = last_out
+
+        content = msg.get('content', [])
         for b in content:
             if b.get('type') == 'tool_use':
-                sys.stdout.write('\n  ↳ ' + b['name'] + '\n')
-                sys.stdout.flush()
+                tid = b.get('id', b.get('name', ''))
+                if tid not in seen_tools:
+                    seen_tools.add(tid)
+                    detail = tool_detail(b['name'], b.get('input', {}))
+                    sys.stdout.write(
+                        f\"\n  ↳ {b['name']:<8} {detail:<50}  ↑{in_tok} ↓{out_tok}\n\"
+                    )
+                    sys.stdout.flush()
+
         all_text = ''.join(b.get('text', '') for b in content if b.get('type') == 'text')
         if len(all_text) > prev_len:
             sys.stdout.write(all_text[prev_len:])
             sys.stdout.flush()
             prev_len = len(all_text)
-sys.stdout.write('\n')
-sys.stdout.flush()
+
+    elif t == 'result':
+        cost = ev.get('cost_usd') or ev.get('total_cost_usd') or 0
+        sys.stdout.write('\n' + '─' * 60 + '\n')
+        sys.stdout.write(f'tokens: ↑{last_in} in  ↓{last_out} out')
+        if cost:
+            sys.stdout.write(f'  |  \${cost:.4f}')
+        sys.stdout.write('\n')
+        sys.stdout.flush()
 " || die "falha ao chamar o claude"
 
   git -C "$REPO" add .bac/draft/
