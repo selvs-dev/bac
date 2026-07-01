@@ -315,55 +315,36 @@ action_refine() {
   local n=${#refine_files[@]}
   echo "refinando $id ($n nota(s) do usuário)..."
 
-  local refine_block=""
-  local i=1
+  local item_rel refine_list=""
+  item_rel="$(realpath --relative-to="$REPO" "$item")"
   for f in "${refine_files[@]}"; do
-    refine_block+="### Nota $i"$'\n'
-    refine_block+="$(cat "$f")"$'\n\n'
-    ((i++)) || true
+    refine_list+="- $(realpath --relative-to="$REPO" "$f")"$'\n'
   done
 
   local prompt
   prompt="$(cat <<PROMPT
 Você é um Product Owner refinando uma história de usuário no sistema BAC (Backlog-as-Code).
 
-A história atual está abaixo:
+Tarefa:
+1. Leia a história: ${item_rel}
+2. Leia os comentários do usuário:
+${refine_list}
+3. Atualize a história incorporando os comentários (mantenha frontmatter YAML, badge de status e estrutura de seções)
+4. Apague os arquivos de comentários após processar
 
-<historia>
-$(cat "$item")
-</historia>
-
-O usuário escreveu as seguintes notas de refinamento para esta história:
-
-<notas>
-${refine_block}
-</notas>
-
-Sua tarefa:
-- Incorpore as notas do usuário na história, atualizando as seções relevantes
-- Se o usuário indicou algo novo, adicione; se corrigiu algo, corrija
-- Se as notas forem genéricas ou vazias, mantenha a história como está
-- Mantenha o formato markdown e a estrutura existente (frontmatter YAML, badge de status, seções)
-
-IMPORTANTE: Esta é uma chamada programática. Sua resposta deve conter EXCLUSIVAMENTE o
-conteúdo atualizado do arquivo markdown — sem explicações, sem comentários, sem blocos de
-código, sem cabeçalhos adicionais. O texto deve começar diretamente com --- ou com #.
-
+Se os comentários forem vazios ou não tiverem conteúdo útil, mantenha a história como está e apague os arquivos assim mesmo.
 PROMPT
 )"
 
   echo "chamando claude..."
-  local tmpresult
-  tmpresult="$(mktemp)"
 
-  echo "$prompt" | claude --print --verbose \
+  (cd "$REPO" && echo "$prompt" | claude --print --verbose \
     --output-format stream-json \
     --include-partial-messages \
-    --disallowedTools "Write,Edit,Bash,TodoWrite" \
+    --allowedTools "Read,Write,Edit,Bash,Glob,Grep,LS") \
   | python3 -c "
 import sys, json
 prev_len = 0
-out = open(sys.argv[1], 'w')
 for raw in sys.stdin:
     raw = raw.strip()
     if not raw:
@@ -384,31 +365,13 @@ for raw in sys.stdin:
             sys.stdout.write(all_text[prev_len:])
             sys.stdout.flush()
             prev_len = len(all_text)
-    elif t == 'result':
-        out.write(ev.get('result', ''))
-out.close()
 sys.stdout.write('\n')
 sys.stdout.flush()
-" "$tmpresult" || { rm -f "$tmpresult"; die "falha ao chamar o claude"; }
-
-  local updated
-  updated="$(cat "$tmpresult")"
-  rm -f "$tmpresult"
-  [[ -n "$updated" ]] || die "claude não retornou conteúdo"
-
-  updated="$(printf '%s' "$updated" | sed '/^```[a-z]*$/d; /^```$/d')"
-
-  echo "$updated" > "$item"
-
-  for f in "${refine_files[@]}"; do
-    rm "$f"
-  done
-
-  echo "história atualizada: $(basename "$item")"
+" || die "falha ao chamar o claude"
 
   git -C "$REPO" add .bac/draft/
   git -C "$REPO" diff --cached --quiet \
-    || git -C "$REPO" commit -m "refine($id): incorpora notas de refinamento via IA"
+    || git -C "$REPO" commit -m "refine($id): incorpora comentários via IA"
 }
 
 action_status() {
