@@ -15,10 +15,14 @@ done
 [[ "$REPO" == "." ]] && REPO="$(pwd)"
 [[ -d "$REPO/.bac" ]] || { echo "erro: .bac não encontrado em $REPO" >&2; exit 1; }
 
-last=$(grep -roh 'id=FEAT-[0-9]\+' "$REPO/.bac/" 2>/dev/null \
-  | grep -oP '[0-9]+' \
+last=$(find "$REPO/.bac/draft" "$REPO/.bac/backlog" "$REPO/.bac"/sprint-* \
+    -maxdepth 1 -name "FEAT-[0-9]*.md" \
+    ! -name "*-[0-9][0-9][0-9][0-9][0-9][0-9][0-9][0-9]-[0-9][0-9][0-9][0-9].md" \
+    ! -name "*-blocker-*" \
+    2>/dev/null \
+  | grep -oP 'FEAT-\K[0-9]+' \
   | sort -n \
-  | tail -1)
+  | tail -1 || true)
 
 next=$(( 10#${last:-0} + 1 ))
 printf 'FEAT-%03d\n' "$next"
